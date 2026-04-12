@@ -9,8 +9,28 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "openapi-template-db",
-			"database_id": "ce5cc2f7-755a-493d-a4f6-12550084b599"
+			"database_name": "ai-video-app-db",
+			"database_id": "fe26e0cf-a9a7-44e2-84f8-7d29b66c0a40",
+			"migrations_dir": "migrations"
 		}
-	]
+	],
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "ai-media-assets"
+		}
+	],
+	"vars": {
+		"ENVIRONMENT": "development",
+		"R2_BUCKET_NAME": "ai-media-assets"
+	},
+	"triggers": {
+		"crons": ["*/2 * * * *"]
+	}
+	// Secrets (set via `wrangler secret put`):
+	// - JWT_SECRET
+	// - R2_ACCESS_KEY_ID
+	// - R2_SECRET_ACCESS_KEY
+	// - R2_ACCOUNT_ID
+	// - ATLASCLOUD_API_KEY
 }
