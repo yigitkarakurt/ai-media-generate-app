@@ -18,6 +18,9 @@ import { adminAssetRoutes } from "./modules/admin/assets";
 import { adminFilterRoutes } from "./modules/admin/filters";
 import { adminSettingRoutes } from "./modules/admin/settings";
 import { internalGenerationRoutes } from "./modules/internal/generations";
+import { mobileBillingRoutes } from "./modules/mobile/billing";
+import { adminBillingRoutes } from "./modules/admin/billing";
+import { revenuecatWebhookRoutes } from "./modules/webhooks/revenuecat";
 import { handleScheduled } from "./core/generation/scheduled";
 
 const app = new Hono<AppEnv>();
@@ -57,6 +60,7 @@ app.route("/api/mobile/generations", mobileGenerationRoutes);
 app.route("/api/mobile/uploads", mobileUploadRoutes);
 app.route("/api/mobile/assets", mobileAssetRoutes);
 app.route("/api/mobile/devices", mobileDeviceRoutes);
+app.route("/api/mobile/billing", mobileBillingRoutes);
 
 // Admin panel routes
 app.route("/api/admin/dashboard", adminDashboardRoutes);
@@ -65,9 +69,13 @@ app.route("/api/admin/jobs", adminJobRoutes);
 app.route("/api/admin/assets", adminAssetRoutes);
 app.route("/api/admin/filters", adminFilterRoutes);
 app.route("/api/admin/settings", adminSettingRoutes);
+app.route("/api/admin/billing", adminBillingRoutes);
 
 // Internal routes (service-to-service, not client-facing)
 app.route("/api/internal/generations", internalGenerationRoutes);
+
+// Webhook routes (external service callbacks, not client-facing)
+app.route("/api/webhooks/revenuecat", revenuecatWebhookRoutes);
 
 export default {
 	fetch: app.fetch,

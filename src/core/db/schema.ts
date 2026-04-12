@@ -87,3 +87,60 @@ export interface AdminSettingRow {
 	description: string | null;
 	updated_at: string;
 }
+
+/* ──────────────── Billing Row Types ──────────────── */
+
+export interface BillingCustomerRow {
+	id: string;
+	user_id: string;
+	rc_app_user_id: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface BillingProductRow {
+	id: string;
+	rc_product_id: string;
+	type: "subscription" | "coin_pack";
+	name: string;
+	coin_amount: number | null;
+	entitlement_id: string | null;
+	is_active: number; // SQLite boolean (0 or 1)
+	created_at: string;
+	updated_at: string;
+}
+
+export interface UserEntitlementRow {
+	id: string;
+	user_id: string;
+	entitlement_id: string;
+	rc_product_id: string;
+	is_active: number; // SQLite boolean (0 or 1)
+	expires_at: string | null;
+	original_purchase_at: string | null;
+	last_renewed_at: string | null;
+	unsubscribed_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface BillingEventRow {
+	id: string;
+	rc_event_id: string;
+	event_type: string;
+	rc_product_id: string | null;
+	user_id: string | null;
+	payload: string; // JSON string
+	processed_at: string;
+	created_at: string;
+}
+
+export interface CoinLedgerRow {
+	id: string;
+	user_id: string;
+	amount: number;
+	reason: "purchase" | "generation_debit" | "refund" | "admin_grant" | "admin_debit" | "bonus";
+	billing_event_id: string | null;
+	description: string;
+	created_at: string;
+}
