@@ -8,10 +8,10 @@
 		"zod": "3.25.67"
 	},
 	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "0.10.11",
+		"@cloudflare/vitest-pool-workers": "^0.14.6",
 		"@types/node": "24.10.1",
 		"typescript": "5.9.3",
-		"vitest": "3.2.4",
+		"vitest": "^4.1.4",
 		"wrangler": "4.56.0"
 	},
 	"scripts": {
@@ -19,6 +19,9 @@
 		"deploy": "wrangler deploy",
 		"predeploy": "wrangler d1 migrations apply DB --remote",
 		"cf-typegen": "wrangler types",
-		"test": "wrangler deploy --dry-run && npx vitest run --config tests/vitest.config.mts"
+		"test": "npm run test:run",
+		"test:run": "vitest run --config tests/vitest.config.mts",
+		"test:watch": "vitest --config tests/vitest.config.mts",
+		"test:worker-check": "wrangler deploy --dry-run"
 	}
 }

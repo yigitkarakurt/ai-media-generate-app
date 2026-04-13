@@ -638,6 +638,43 @@ npm test
 npm run cf-typegen
 ```
 
+## Testing
+
+The backend test suite uses Vitest with Cloudflare's Workers test integration.
+Tests run locally in Miniflare with Worker-compatible D1 and R2 bindings, and
+exercise the real router where practical.
+
+```bash
+# Run the test suite once
+npm test
+
+# Equivalent explicit command for CI
+npm run test:run
+
+# Watch mode
+npm run test:watch
+
+# Validate Worker bundling separately
+npm run test:worker-check
+```
+
+Current coverage focuses on the first critical backend flows:
+
+- RevenueCat coin-pack webhook idempotency and unknown product handling
+- RevenueCat subscription lifecycle normalization
+- Generation insufficient-coins rejection
+- Generation debit refund when Atlas dispatch fails
+- Admin billing route auth protection
+
+The tests use real D1 migrations, explicit per-test database cleanup, and
+test-only bindings for provider secrets. Atlas dispatch is stubbed only where a
+deterministic provider failure is required; R2 remains a real Miniflare binding.
+
+Next testing pass should cover auth bootstrap/session validation, upload
+request and confirm with R2 object checks, successful generation dispatch and
+sync completion, asset read URL behavior, mobile billing routes, and broader
+admin product CRUD validation.
+
 ## Media Validation
 
 | Constraint | Value |
