@@ -9,6 +9,8 @@ export interface UserRow {
 	auth_provider: string;
 	auth_provider_id: string;
 	role: "user" | "admin";
+	is_anonymous: number; // SQLite boolean (0 or 1)
+	status: string; // 'active' | 'suspended' | 'deleted'
 	created_at: string;
 	updated_at: string;
 }
@@ -45,6 +47,7 @@ export interface FilterRow {
 	prompt_template: string;
 	default_params_json: string | null; // JSON string
 	is_active: number; // SQLite boolean (0 or 1)
+	coin_cost: number; // 0 means free
 	sort_order: number;
 	created_at: string;
 	updated_at: string;
@@ -120,6 +123,7 @@ export interface UserEntitlementRow {
 	original_purchase_at: string | null;
 	last_renewed_at: string | null;
 	unsubscribed_at: string | null;
+	billing_issue_at: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -143,4 +147,49 @@ export interface CoinLedgerRow {
 	billing_event_id: string | null;
 	description: string;
 	created_at: string;
+}
+
+/* ──────────────── Auth Row Types ──────────────── */
+
+export interface UserDeviceRow {
+	id: string;
+	user_id: string;
+	device_identifier: string | null;
+	installation_id: string | null;
+	platform: "ios" | "android";
+	device_model: string | null;
+	os_version: string | null;
+	app_version: string | null;
+	integrity_level: string | null;
+	integrity_checked_at: string | null;
+	risk_score: number | null;
+	device_attestation_status: string | null;
+	is_active: number;
+	first_seen_at: string;
+	last_seen_at: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface AuthSessionRow {
+	id: string;
+	user_id: string;
+	token_hash: string;
+	device_id: string | null;
+	is_active: number;
+	expires_at: string | null;
+	last_used_at: string;
+	created_at: string;
+}
+
+export interface AuthIdentityRow {
+	id: string;
+	user_id: string;
+	provider: string;
+	provider_id: string;
+	provider_email: string | null;
+	provider_metadata: string | null;
+	linked_at: string;
+	created_at: string;
+	updated_at: string;
 }

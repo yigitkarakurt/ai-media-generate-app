@@ -11,6 +11,7 @@ import { mobileGenerationRoutes } from "./modules/mobile/generations";
 import { mobileUploadRoutes } from "./modules/mobile/uploads";
 import { mobileAssetRoutes } from "./modules/mobile/assets";
 import { mobileDeviceRoutes } from "./modules/mobile/devices";
+import { mobileAuthRoutes } from "./modules/mobile/auth";
 import { adminDashboardRoutes } from "./modules/admin/dashboard";
 import { adminUserRoutes } from "./modules/admin/users";
 import { adminJobRoutes } from "./modules/admin/jobs";
@@ -22,6 +23,7 @@ import { mobileBillingRoutes } from "./modules/mobile/billing";
 import { adminBillingRoutes } from "./modules/admin/billing";
 import { revenuecatWebhookRoutes } from "./modules/webhooks/revenuecat";
 import { handleScheduled } from "./core/generation/scheduled";
+import { requireAdmin } from "./middleware/admin-auth";
 
 const app = new Hono<AppEnv>();
 
@@ -55,6 +57,7 @@ app.notFound((c) => {
 app.route("/api", healthRoutes);
 
 // Mobile client routes
+app.route("/api/mobile/auth", mobileAuthRoutes);
 app.route("/api/mobile/filters", mobileFilterRoutes);
 app.route("/api/mobile/generations", mobileGenerationRoutes);
 app.route("/api/mobile/uploads", mobileUploadRoutes);
@@ -62,7 +65,8 @@ app.route("/api/mobile/assets", mobileAssetRoutes);
 app.route("/api/mobile/devices", mobileDeviceRoutes);
 app.route("/api/mobile/billing", mobileBillingRoutes);
 
-// Admin panel routes
+// Admin panel routes (all require admin key)
+app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin/dashboard", adminDashboardRoutes);
 app.route("/api/admin/users", adminUserRoutes);
 app.route("/api/admin/jobs", adminJobRoutes);

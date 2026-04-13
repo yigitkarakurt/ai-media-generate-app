@@ -18,9 +18,25 @@ src/
 │   ├── media.ts                     # Media validation (mime types, file size, storage keys)
 │   └── validation.ts               # Shared Zod schemas (pagination, UUID params)
 │
+├── lib/
+│   └── r2.ts                       # R2 presigned URL generation (upload + read)
+│
+├── middleware/
+│   ├── auth.ts                      # Production auth (Bearer token + dev fallback)
+│   ├── admin-auth.ts                # Admin API key auth (X-Admin-Key header)
+│   └── dev-auth.ts                  # Legacy dev auth (kept for reference)
+│
 ├── core/
+│   ├── auth/
+│   │   ├── bootstrap.ts             # Anonymous auth bootstrap orchestration
+│   │   ├── devices.ts               # Device record recovery + registration
+│   │   └── sessions.ts              # Opaque session token management
 │   ├── assets/
 │   │   └── client.ts               # Client-safe asset type + toClientAsset() helper
+│   ├── billing/
+│   │   ├── types.ts                 # RevenueCat webhook types, billing domain types
+│   │   ├── queries.ts               # Billing DB helpers (coins, entitlements, products)
+│   │   └── process-event.ts         # RevenueCat webhook event processor
 │   ├── db/
 │   │   └── schema.ts               # TypeScript types matching D1 tables
 │   └── generation/
@@ -32,22 +48,19 @@ src/
 │           ├── index.ts             # Provider registry
 │           └── atlas.ts             # Atlas Cloud adapter (submit + status polling)
 │
-├── lib/
-│   └── r2.ts                       # R2 presigned URL generation (upload + read)
-│
-├── middleware/
-│   └── dev-auth.ts                  # Temporary dev auth (X-Dev-User-Id header)
-│
 └── modules/
     ├── health/
     │   └── routes.ts                # GET /api/health, GET /api/version
     ├── mobile/
+    │   ├── auth.ts                  # POST /bootstrap, GET /me, POST /logout
     │   ├── assets.ts                # GET /api/mobile/assets, GET /api/mobile/assets/:id
     │   ├── filters.ts               # GET /api/mobile/filters
     │   ├── generations.ts           # GET,POST /api/mobile/generations
     │   ├── uploads.ts               # POST /api/mobile/uploads/request, /confirm
+    │   ├── billing.ts               # Billing state, coins, entitlements
     │   └── devices.ts               # POST,DELETE /api/mobile/devices/push-token
     ├── admin/
+    │   ├── billing.ts               # Product CRUD, coin grant/debit, events
     │   ├── dashboard.ts             # GET /api/admin/dashboard
     │   ├── users.ts                 # GET /api/admin/users
     │   ├── jobs.ts                  # GET /api/admin/jobs, POST cancel
@@ -308,6 +321,7 @@ The sync function is safe to call multiple times:
 | Filter must exist | `NOT_FOUND` |
 | Filter must be active | `FILTER_INACTIVE` |
 | Filter must accept the asset's media type | `MEDIA_TYPE_INCOMPATIBLE` |
+| User must have enough coins for filter's `coin_cost` | `INSUFFICIENT_COINS` |
 
 ### Client-Facing Job Fields
 
@@ -333,21 +347,204 @@ The mobile client receives only normalized fields — no provider internals:
 Provider-specific fields (`provider_name`, `provider_job_id`, `provider_status`) are
 stored in D1 but never exposed to the mobile client.
 
+## Authentication
+
+### Model: anonymous-first, no login screen
+
+Users start using the app immediately. On first launch, the mobile client
+calls **POST /api/mobile/auth/bootstrap** with a device payload. The backend
+either recovers an existing anonymous user or creates a new one, then returns
+an opaque session token.
+
+All subsequent requests use `Authorization: Bearer <token>`.
+
+### Token / session design
+
+**Opaque tokens backed by D1** (not JWTs).
+
+- A 256-bit random token prefixed with `amb_` is generated on bootstrap.
+- Only a SHA-256 hash of the token is stored in the `auth_sessions` table.
+- The raw token is returned to the client once and never stored on the backend.
+- Tokens expire after 90 days by default.
+- Revocation is instant — deactivate the session row.
+
+This was chosen over JWTs because:
+- Revocation is trivial (no blacklist infrastructure needed).
+- No token-refresh complexity for the client.
+- D1 lookups are fast (same datacenter as the Worker).
+- Simpler to implement correctly.
+
+### Device recovery (best-effort)
+
+On bootstrap, the backend attempts to match the client's `device_identifier`
+and `platform` against known device records. If a match is found and the
+linked user is still active, that user is recovered instead of creating a new
+account.
+
+**Limitations — be honest about these:**
+
+- `device_identifier` (Android ID, identifierForVendor, etc.) is **not
+  permanent**. It can change after factory reset, OS reinstall, or on certain
+  device models.
+- Recovery is **best-effort only**. There is no guarantee that the same user
+  will be recovered after a device wipe.
+- `installation_id` (app-local) changes on every reinstall by definition —
+  it is recorded for observability but not used as a primary recovery key.
+- If the device identifier is absent or null, recovery is skipped entirely.
+- The system prefers creating a new user over making a wrong match.
+
+The architecture supports future integrity signals (Play Integrity, App
+Attest) via placeholder columns on `user_devices`, but none are implemented
+yet.
+
+### No-login onboarding flow
+
+```
+Mobile App                              Backend
+─────────                               ───────
+1. First launch
+2. Collect device info
+   (platform, device_id, install_id,
+    app_version, model, os_version)
+3. POST /auth/bootstrap ──────────────► 4. Look for matching device
+                                        5. If found → recover user
+                                           If not  → create anon user
+                                        6. Register/update device record
+                                        7. Issue session token
+                              ◄──────── 8. Return { access_token, user, ... }
+9. Store access_token locally
+10. Use Bearer token for all requests
+```
+
+### Auth endpoints
+
+| Method | Path                           | Auth     | Description                     |
+|--------|--------------------------------|----------|---------------------------------|
+| POST   | /api/mobile/auth/bootstrap     | None     | Create or recover anonymous user |
+| GET    | /api/mobile/auth/me            | Required | Current user info               |
+| POST   | /api/mobile/auth/logout        | Required | Revoke current session          |
+
+### Dev auth (non-production only)
+
+In development, the `X-Dev-User-Id` header is still accepted as a fallback
+so existing Postman collections and dev tools continue to work. This header
+is rejected in production.
+
+## Billing (RevenueCat)
+
+### RevenueCat webhook event handling
+
+The backend processes RevenueCat server-to-server webhooks at
+`POST /api/webhooks/revenuecat`, authenticated with a shared Bearer secret.
+
+| Event Type | Behavior |
+|------------|----------|
+| `INITIAL_PURCHASE` | Activate entitlement (subscription) or grant coins (coin_pack) |
+| `RENEWAL` | Refresh entitlement, update `last_renewed_at`, clear billing issues |
+| `NON_RENEWING_PURCHASE` | Grant coins for coin_pack products |
+| `CANCELLATION` | **Subscription:** mark `unsubscribed_at`, keep active until expiration. **Coin pack:** create negative refund ledger entry. |
+| `UNCANCELLATION` | Clear `unsubscribed_at` and `billing_issue_at` — user re-subscribed |
+| `EXPIRATION` | Mark entitlement inactive (`is_active = 0`) |
+| `BILLING_ISSUE` | Record `billing_issue_at` timestamp — do NOT revoke access (grace period) |
+| `PRODUCT_CHANGE` | Update `rc_product_id` and `entitlement_id` on user entitlement |
+
+### Subscription lifecycle
+
+```
+INITIAL_PURCHASE → active (is_active=1, unsubscribed_at=NULL)
+    │
+    ├─ RENEWAL → active, last_renewed_at refreshed
+    ├─ BILLING_ISSUE → active, billing_issue_at set (grace period)
+    ├─ CANCELLATION → active, unsubscribed_at set (still valid until expiry)
+    │   └─ UNCANCELLATION → active, unsubscribed_at cleared
+    ├─ PRODUCT_CHANGE → active, product/entitlement updated
+    └─ EXPIRATION → inactive (is_active=0)
+```
+
+### Coin pack refunds
+
+When a `CANCELLATION` event targets a coin_pack product, a **negative**
+compensating entry is written to `coin_ledger` with reason `refund`.
+The append-only ledger is never mutated — only new entries are added.
+
+### Idempotency
+
+- **Event-level:** `billing_events.rc_event_id` has a UNIQUE index. Duplicate
+  webhook deliveries return `skipped_duplicate` immediately.
+- **Coin-grant-level:** `hasCoinEntryForEvent()` prevents double credits even
+  if the event-level check were somehow bypassed.
+- **Atomic writes:** `db.batch()` writes the event record and its side effects
+  (entitlement upsert, coin entry) in a single D1 batch. If the batch fails,
+  neither the event nor the side effect is persisted, so RevenueCat's retry
+  will process cleanly.
+
+### Generation coin debit
+
+Each filter has a `coin_cost` column (default 0 = free). When a user submits
+a generation:
+
+1. Backend reads `filter.coin_cost`
+2. If cost > 0, checks `getCoinBalance(userId) >= cost`
+3. If insufficient, rejects with `INSUFFICIENT_COINS`
+4. Creates a negative `generation_debit` entry in `coin_ledger`
+5. Dispatches to the provider
+6. If dispatch fails, creates a positive `refund` compensating entry
+
+The client never provides the cost — it is always backend-controlled.
+
+### Admin billing management
+
+All admin routes require `X-Admin-Key` header (see Admin Auth below).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/billing/products` | List all products (including inactive) |
+| POST | `/api/admin/billing/products` | Create a product |
+| PATCH | `/api/admin/billing/products/:id` | Update a product |
+| GET | `/api/admin/billing/users/:id` | Full billing detail for a user |
+| POST | `/api/admin/billing/users/:id/coin-grant` | Grant coins manually |
+| POST | `/api/admin/billing/users/:id/coin-debit` | Debit coins manually |
+| GET | `/api/admin/billing/events` | Paginated webhook event log |
+
+Products must be seeded before billing works. Example:
+```bash
+curl -X POST http://localhost:8787/api/admin/billing/products \
+  -H "X-Admin-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"rc_product_id":"com.app.coins_100","type":"coin_pack","name":"100 Coins","coin_amount":100}'
+```
+
+### Admin auth
+
+All `/api/admin/*` routes are protected by the `requireAdmin` middleware.
+It validates the `X-Admin-Key` header against the `ADMIN_API_KEY` secret
+using timing-safe comparison.
+
+In development without `ADMIN_API_KEY` configured, admin routes are open
+(so dev tooling works without extra setup). In production, the key is required.
+
+```bash
+wrangler secret put ADMIN_API_KEY
+```
+
 ## Route Groups
 
 | Group | Base Path | Auth | Description |
 |-------|-----------|------|-------------|
 | Health | `/api/health`, `/api/version` | None | Service health and version |
-| Mobile Uploads | `/api/mobile/uploads` | User | Request presigned URLs + confirm uploads |
-| Mobile Assets | `/api/mobile/assets` | User | List/view own assets |
-| Mobile Filters | `/api/mobile/filters` | User | Browse active filters |
-| Mobile Generations | `/api/mobile/generations` | User | Submit and track generation jobs |
-| Mobile Devices | `/api/mobile/devices` | User | Register push notification tokens |
+| Mobile Auth | `/api/mobile/auth` | Mixed | Bootstrap (none), me/logout (Bearer) |
+| Mobile Uploads | `/api/mobile/uploads` | Bearer | Request presigned URLs + confirm uploads |
+| Mobile Assets | `/api/mobile/assets` | Bearer | List/view own assets |
+| Mobile Filters | `/api/mobile/filters` | None | Browse active filters |
+| Mobile Generations | `/api/mobile/generations` | Bearer | Submit and track generation jobs |
+| Mobile Billing | `/api/mobile/billing` | Bearer | Billing state, coins, entitlements |
+| Mobile Devices | `/api/mobile/devices` | Bearer | Register push notification tokens |
 | Admin Dashboard | `/api/admin/dashboard` | Admin | Aggregate stats |
 | Admin Users | `/api/admin/users` | Admin | User management |
 | Admin Jobs | `/api/admin/jobs` | Admin | Job monitoring and cancellation |
 | Admin Assets | `/api/admin/assets` | Admin | Asset management |
 | Admin Filters | `/api/admin/filters` | Admin | Filter CRUD |
+| Admin Billing | `/api/admin/billing` | Admin | Product CRUD, coin ops, events |
 | Admin Settings | `/api/admin/settings` | Admin | Key-value config store |
 | Internal Generations | `/api/internal/generations` | None* | Job sync (single + batch) |
 
@@ -357,26 +554,24 @@ stored in D1 but never exposed to the mobile client.
 |---------|----------|-------------|
 | Cron | `*/2 * * * *` | Automatic batch sync of pending generation jobs |
 
-## Authentication (Development)
-
-During development, use the `X-Dev-User-Id` header to simulate an authenticated user:
-
-```bash
-curl -H "X-Dev-User-Id: test-user-123" http://localhost:8787/api/mobile/assets
-```
-
-This header is **blocked in production**. Replace with real JWT auth before deploying.
-
 ## Database Tables
 
 | Table | Description |
 |-------|-------------|
-| `users` | User accounts (email, auth provider, role) |
+| `users` | User accounts with `is_anonymous` and `status` fields |
+| `user_devices` | Device records linked to users (recovery signals) |
+| `auth_sessions` | Opaque session tokens (SHA-256 hashed) |
+| `auth_identities` | Future: linked Apple/Google/email identities |
 | `assets` | Uploaded/generated media files with `kind` (input/output), linked to R2 |
 | `filters` | AI generation filter catalog |
 | `generation_jobs` | Generation job queue with status tracking |
 | `device_push_tokens` | Push notification tokens per device |
 | `admin_settings` | Key-value configuration store |
+| `billing_customers` | RevenueCat customer mapping |
+| `billing_products` | Product catalog (subscriptions + coin packs) |
+| `user_entitlements` | Active subscription/entitlement state |
+| `billing_events` | Webhook event idempotency log |
+| `coin_ledger` | Append-only coin transaction log |
 
 ## API Response Format
 
@@ -406,6 +601,8 @@ All endpoints return consistent JSON:
 | `R2_SECRET_ACCESS_KEY` | Secret | R2 S3 API secret key |
 | `R2_ACCOUNT_ID` | Secret | Cloudflare account ID for R2 S3 endpoint |
 | `ATLASCLOUD_API_KEY` | Secret | Atlas Cloud API key for generation |
+| `REVENUECAT_WEBHOOK_SECRET` | Secret | RevenueCat webhook Bearer token |
+| `ADMIN_API_KEY` | Secret | Admin panel API key (`X-Admin-Key` header) |
 
 ## Development
 
@@ -426,6 +623,10 @@ wrangler secret put R2_ACCOUNT_ID
 
 # Set provider API keys
 wrangler secret put ATLASCLOUD_API_KEY
+
+# Set billing/admin secrets
+wrangler secret put REVENUECAT_WEBHOOK_SECRET
+wrangler secret put ADMIN_API_KEY
 
 # Deploy
 npm run deploy
@@ -448,25 +649,29 @@ npm run cf-typegen
 
 ## Next Implementation Steps
 
-1. **Push notifications** — Notify users when generation completes/fails
-2. **Webhook receiver** — Optional provider callback endpoint for faster status updates
-3. **Reference image support** — Multi-image input for providers that support it
-4. **Second provider** — fal.ai adapter using the same provider router
-5. **Authentication middleware** — JWT verification, replace dev-auth
-6. **Admin auth** — Separate admin authentication/authorization
-7. **Internal route auth** — Shared secret or Cloudflare Access for service-to-service routes
-8. **Rate limiting** — Per-user and per-endpoint limits
+1. **Account linking** — Apple/Google/email login, merging anonymous accounts
+2. **Push notifications** — Notify users when generation completes/fails
+3. **Rate limiting** — Per-endpoint limits on bootstrap, generations, uploads
+4. **Play Integrity / App Attest** — Device attestation checks (columns ready)
+5. **Token refresh** — Optional if 90-day expiry proves insufficient
+6. **Reference image support** — Multi-image input for providers that support it
+7. **Second provider** — fal.ai adapter using the same provider router
+8. **Internal route auth** — Shared secret or Cloudflare Access for service-to-service routes
 9. **Scheduled cleanup** — Cron trigger for stale queued jobs and orphaned assets
 10. **Asset deletion** — Allow users to delete their own assets (R2 + D1 cleanup)
-11. **Job polling / SSE** — Optional real-time status updates for the mobile client
 
 ### Intentionally Deferred (Not in Current Implementation)
 
+- Apple / Google / email login (auth_identities table is prepared)
+- Account linking (merging anonymous with social login)
+- Play Integrity / App Attest (placeholder columns exist on user_devices)
+- Multi-device session management UI
+- Token refresh mechanism
 - Push notifications on job completion
-- Webhook receiver for provider callbacks
 - Reference image / multi-image input support
 - User-provided custom prompts (prompts come from filter config only)
 - Second provider integration (fal.ai, etc.)
-- Cancel via Atlas API
 - Public unauthenticated asset URLs
-- Admin dashboard metrics overhaul
+- Advanced financial reporting / full refund reconciliation
+- Mobile RevenueCat SDK integration (client-side)
+- Webhook signature verification beyond shared Bearer secret

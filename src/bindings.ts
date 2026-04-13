@@ -14,6 +14,8 @@ export interface AppBindings {
 	ATLASCLOUD_API_KEY: string;
 	// RevenueCat webhook verification
 	REVENUECAT_WEBHOOK_SECRET: string;
+	// Admin API key (set via `wrangler secret put ADMIN_API_KEY`)
+	ADMIN_API_KEY: string;
 }
 
 export interface AppEnv {

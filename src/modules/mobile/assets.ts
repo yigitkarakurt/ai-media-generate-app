@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AuthedEnv } from "../../middleware/dev-auth";
-import { devAuth } from "../../middleware/dev-auth";
+import type { AuthedEnv } from "../../middleware/auth";
+import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import { AppError } from "../../shared/errors";
@@ -21,7 +21,7 @@ const listAssetsQuery = paginationQuery.extend({
 const assets = new Hono<AuthedEnv>();
 
 // All asset routes require authentication
-assets.use("/*", devAuth);
+assets.use("/*", requireAuth);
 
 /**
  * GET /api/mobile/assets

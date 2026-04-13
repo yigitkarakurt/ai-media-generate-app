@@ -4,6 +4,7 @@ import type {
 	UserEntitlementRow,
 	BillingEventRow,
 } from "../db/schema";
+import type { CoinReason } from "./types";
 
 /* ──────────────── Customer lookups ──────────────── */
 
@@ -180,6 +181,67 @@ export async function hasCoinEntryForEvent(
 	return row !== null;
 }
 
+/* ──────────────── Compensating / debit coin entries ──────────────── */
+
+/**
+ * Create a compensating (refund) coin entry. Always positive amount.
+ */
+export async function createCompensatingCoinEntry(
+	db: D1Database,
+	params: {
+		userId: string;
+		amount: number;
+		reason: CoinReason;
+		billingEventId: string | null;
+		description: string;
+	},
+): Promise<void> {
+	const absAmount = Math.abs(params.amount);
+	await insertCoinEntry(db, { ...params, amount: absAmount });
+}
+
+/**
+ * Create a debit (negative) coin entry for generation usage.
+ * Returns the ledger entry id.
+ */
+export async function createGenerationDebit(
+	db: D1Database,
+	userId: string,
+	amount: number,
+	jobId: string,
+): Promise<string> {
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+	await db
+		.prepare(
+			`INSERT INTO coin_ledger (id, user_id, amount, reason, billing_event_id, description, created_at)
+			 VALUES (?, ?, ?, 'generation_debit', NULL, ?, ?)`,
+		)
+		.bind(id, userId, -Math.abs(amount), `Generation job ${jobId}`, now)
+		.run();
+	return id;
+}
+
+/**
+ * Refund a failed generation. Positive compensating entry.
+ */
+export async function refundGenerationDebit(
+	db: D1Database,
+	userId: string,
+	amount: number,
+	jobId: string,
+): Promise<void> {
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+	await db
+		.prepare(
+			`INSERT INTO coin_ledger (id, user_id, amount, reason, billing_event_id, description, created_at)
+			 VALUES (?, ?, ?, 'refund', NULL, ?, ?)`,
+		)
+		.bind(id, userId, Math.abs(amount), `Refund for failed generation ${jobId}`, now)
+		.run();
+}
+
 /* ──────────────── Event idempotency ──────────────── */
 
 export async function getEventByRCId(
@@ -190,6 +252,35 @@ export async function getEventByRCId(
 		.prepare("SELECT * FROM billing_events WHERE rc_event_id = ?")
 		.bind(rcEventId)
 		.first<BillingEventRow>();
+}
+
+export function buildInsertEventStatement(
+	db: D1Database,
+	params: {
+		id: string;
+		rcEventId: string;
+		eventType: string;
+		rcProductId: string | null;
+		userId: string | null;
+		payload: string;
+		now: string;
+	},
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO billing_events (id, rc_event_id, event_type, rc_product_id, user_id, payload, processed_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			params.id,
+			params.rcEventId,
+			params.eventType,
+			params.rcProductId,
+			params.userId,
+			params.payload,
+			params.now,
+			params.now,
+		);
 }
 
 export async function insertEvent(
@@ -204,21 +295,14 @@ export async function insertEvent(
 ): Promise<string> {
 	const id = crypto.randomUUID();
 	const now = new Date().toISOString();
-	await db
-		.prepare(
-			`INSERT INTO billing_events (id, rc_event_id, event_type, rc_product_id, user_id, payload, processed_at, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		)
-		.bind(
-			id,
-			params.rcEventId,
-			params.eventType,
-			params.rcProductId,
-			params.userId,
-			params.payload,
-			now,
-			now,
-		)
-		.run();
+	await buildInsertEventStatement(db, {
+		id,
+		rcEventId: params.rcEventId,
+		eventType: params.eventType,
+		rcProductId: params.rcProductId,
+		userId: params.userId,
+		payload: params.payload,
+		now,
+	}).run();
 	return id;
 }

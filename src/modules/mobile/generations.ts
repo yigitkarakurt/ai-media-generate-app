@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AuthedEnv } from "../../middleware/dev-auth";
-import { devAuth } from "../../middleware/dev-auth";
+import type { AuthedEnv } from "../../middleware/auth";
+import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import { AppError } from "../../shared/errors";
@@ -10,6 +10,7 @@ import { GENERATION_STATUSES, isValidGenerationStatus } from "../../core/generat
 import { dispatchGeneration } from "../../core/generation/dispatch";
 import { createPresignedReadUrl } from "../../lib/r2";
 import { toClientAsset } from "../../core/assets/client";
+import { getCoinBalance, createGenerationDebit, refundGenerationDebit } from "../../core/billing/queries";
 
 /* ──────────────── Validation schemas ──────────────── */
 
@@ -48,7 +49,7 @@ function toClientJob(row: GenerationJobRow) {
 const generations = new Hono<AuthedEnv>();
 
 // All generation routes require authentication
-generations.use("/*", devAuth);
+generations.use("/*", requireAuth);
 
 /**
  * POST /api/mobile/generations
@@ -115,6 +116,18 @@ generations.post("/", async (c) => {
 		);
 	}
 
+	/* ── Coin debit check ── */
+	const coinCost = filter.coin_cost ?? 0;
+	if (coinCost > 0) {
+		const balance = await getCoinBalance(db, userId);
+		if (balance < coinCost) {
+			throw AppError.badRequest(
+				"INSUFFICIENT_COINS",
+				`This generation costs ${coinCost} coins but your balance is ${balance}.`,
+			);
+		}
+	}
+
 	/* ── Create generation job ── */
 	const jobId = crypto.randomUUID();
 	const now = new Date().toISOString();
@@ -137,6 +150,11 @@ generations.post("/", async (c) => {
 			now,
 		)
 		.run();
+
+	/* ── Debit coins (after job created, before dispatch) ── */
+	if (coinCost > 0) {
+		await createGenerationDebit(db, userId, coinCost, jobId);
+	}
 
 	/* ── Dispatch to provider ── */
 	const filterConfig = filter.config ? (JSON.parse(filter.config) as Record<string, unknown>) : null;
@@ -180,6 +198,12 @@ generations.post("/", async (c) => {
 				jobId,
 			)
 			.run();
+
+		// Refund debited coins on dispatch failure
+		if (coinCost > 0) {
+			await refundGenerationDebit(db, userId, coinCost, jobId);
+		}
+
 		throw err;
 	}
 

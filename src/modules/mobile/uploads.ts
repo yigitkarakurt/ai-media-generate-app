@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AuthedEnv } from "../../middleware/dev-auth";
-import { devAuth } from "../../middleware/dev-auth";
+import type { AuthedEnv } from "../../middleware/auth";
+import { requireAuth } from "../../middleware/auth";
 import { success } from "../../shared/api-response";
 import { AppError } from "../../shared/errors";
 import {
@@ -35,7 +35,7 @@ const uploadConfirmSchema = z.object({
 const uploads = new Hono<AuthedEnv>();
 
 // All upload routes require authentication
-uploads.use("/*", devAuth);
+uploads.use("/*", requireAuth);
 
 /**
  * POST /api/mobile/uploads/request
