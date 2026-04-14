@@ -31,13 +31,14 @@ describe("wallet concurrency safety", () => {
 		await insertCoinEntry(user.id, 25, "admin_grant");
 
 		// Mock provider to succeed (Atlas expects { data: { id: "..." } })
-		vi.spyOn(globalThis, "fetch").mockResolvedValue(
-			new Response(JSON.stringify({
-				data: { id: "atlas-job-1" },
-			}), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			}),
+		// Use mockImplementation to return a FRESH Response per call (body streams are single-read)
+		vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+			Promise.resolve(
+				new Response(JSON.stringify({ data: { id: `atlas-job-${crypto.randomUUID()}` } }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			),
 		);
 
 		// First generation should succeed
@@ -84,8 +85,8 @@ describe("wallet concurrency safety", () => {
 		await insertCoinEntry(user.id, 50, "admin_grant");
 
 		// Mock provider to fail
-		vi.spyOn(globalThis, "fetch").mockResolvedValue(
-			new Response("provider unavailable", { status: 503 }),
+		vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+			Promise.resolve(new Response("provider unavailable", { status: 503 })),
 		);
 
 		const response = await appFetch("/api/mobile/generations", {
@@ -120,11 +121,14 @@ describe("wallet concurrency safety", () => {
 		const filter = await insertFilter({ coin_cost: 10, input_media_types: "image" });
 		await insertCoinEntry(user.id, 100, "admin_grant");
 
-		vi.spyOn(globalThis, "fetch").mockResolvedValue(
-			new Response(JSON.stringify({
-				id: "atlas-job-1",
-				status: "processing",
-			}), { status: 200 }),
+		// Use mockImplementation to return a FRESH Response per call (body streams are single-read)
+		vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+			Promise.resolve(
+				new Response(JSON.stringify({ data: { id: `atlas-job-${crypto.randomUUID()}` } }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			),
 		);
 
 		// Run 3 generations successfully
