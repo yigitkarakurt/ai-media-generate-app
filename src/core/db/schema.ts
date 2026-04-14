@@ -149,6 +149,12 @@ export interface CoinLedgerRow {
 	created_at: string;
 }
 
+export interface UserWalletRow {
+	user_id: string;
+	balance: number;
+	updated_at: string;
+}
+
 /* ──────────────── Auth Row Types ──────────────── */
 
 export interface UserDeviceRow {

@@ -1,13 +1,17 @@
 import { Hono } from "hono";
-import type { AppEnv } from "../../bindings";
+import type { AuthedEnv } from "../../middleware/auth";
+import { requireAuth } from "../../middleware/auth";
 import { success } from "../../shared/api-response";
 
-const devices = new Hono<AppEnv>();
+const devices = new Hono<AuthedEnv>();
+
+// All device routes require authentication
+devices.use("/*", requireAuth);
 
 /** Register a push notification token */
 devices.post("/push-token", async (c) => {
 	// Will be implemented with push notification integration.
-	// Needs: auth middleware, token validation, upsert logic.
+	// Needs: token validation, upsert logic.
 	return success(c, { message: "Push token registration not yet implemented" }, 501 as any);
 });
 

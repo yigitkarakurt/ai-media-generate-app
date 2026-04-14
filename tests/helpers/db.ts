@@ -12,6 +12,7 @@ const RESET_TABLES = [
 	"user_devices",
 	"device_push_tokens",
 	"coin_ledger",
+	"user_wallets",
 	"billing_events",
 	"user_entitlements",
 	"billing_customers",
@@ -90,4 +91,12 @@ export async function getGenerationJobs(userId: string, db: D1Database = env.DB)
 		.bind(userId)
 		.all<GenerationJobRow>();
 	return result.results;
+}
+
+export async function getWalletBalance(userId: string, db: D1Database = env.DB) {
+	const row = await db
+		.prepare("SELECT balance FROM user_wallets WHERE user_id = ?")
+		.bind(userId)
+		.first<{ balance: number }>();
+	return row?.balance ?? 0;
 }

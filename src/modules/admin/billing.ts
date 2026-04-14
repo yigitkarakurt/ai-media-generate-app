@@ -15,6 +15,7 @@ import {
 	getCoinBalance,
 	insertCoinEntry,
 } from "../../core/billing/queries";
+import { creditWallet, buildWalletDebit, getWalletBalance } from "../../core/billing/wallet";
 
 /* ──────────────── Validation schemas ──────────────── */
 
@@ -101,7 +102,10 @@ billing.post("/users/:id/coin-grant", async (c) => {
 		description: data.description,
 	});
 
-	const balance = await getCoinBalance(db, userId);
+	// Credit wallet (keep in sync with ledger)
+	await creditWallet(db, userId, data.amount);
+
+	const balance = await getWalletBalance(db, userId);
 	return success(c, { user_id: userId, granted: data.amount, balance });
 });
 
@@ -130,7 +134,20 @@ billing.post("/users/:id/coin-debit", async (c) => {
 		description: data.description,
 	});
 
-	const balance = await getCoinBalance(db, userId);
+	// Debit wallet (keep in sync with ledger)
+	const now = new Date().toISOString();
+	await db
+		.prepare(
+			`INSERT INTO user_wallets (user_id, balance, updated_at)
+			 VALUES (?, -?, ?)
+			 ON CONFLICT(user_id) DO UPDATE SET
+				balance = balance - ?,
+				updated_at = ?`,
+		)
+		.bind(userId, data.amount, now, data.amount, now)
+		.run();
+
+	const balance = await getWalletBalance(db, userId);
 	return success(c, { user_id: userId, debited: data.amount, balance });
 });
 

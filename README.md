@@ -426,9 +426,16 @@ Mobile App                              Backend
 
 ### Dev auth (non-production only)
 
-In development, the `X-Dev-User-Id` header is still accepted as a fallback
-so existing Postman collections and dev tools continue to work. This header
-is rejected in production.
+In **development** and **test** environments only, the `X-Dev-User-Id` header
+is accepted as a fallback so existing Postman collections and dev tools
+continue to work.
+
+**Fail-closed:** If `ENVIRONMENT` is missing, empty, or any value other than
+`development` or `test`, the dev auth fallback is **disabled**. This prevents
+accidental auth bypass in production even if `ENVIRONMENT` is misconfigured.
+
+Attempts to use `X-Dev-User-Id` in non-dev environments are logged as security
+events.
 
 ## Billing (RevenueCat)
 
@@ -520,11 +527,26 @@ All `/api/admin/*` routes are protected by the `requireAdmin` middleware.
 It validates the `X-Admin-Key` header against the `ADMIN_API_KEY` secret
 using timing-safe comparison.
 
-In development without `ADMIN_API_KEY` configured, admin routes are open
-(so dev tooling works without extra setup). In production, the key is required.
+**Fail-closed:** If `ADMIN_API_KEY` is not configured and `ENVIRONMENT` is
+not explicitly `development` or `test`, admin routes return 500. The dev
+fallback (open admin access without a key) is only active when `ENVIRONMENT`
+is explicitly set to `development` or `test`.
 
 ```bash
 wrangler secret put ADMIN_API_KEY
+```
+
+### Internal route auth
+
+All `/api/internal/*` routes are protected by the `requireInternal` middleware.
+It validates the `X-Internal-Key` header against the `INTERNAL_API_KEY` secret
+using timing-safe comparison.
+
+**Always fail-closed:** If `INTERNAL_API_KEY` is not configured, internal routes
+reject all requests regardless of environment. There is no dev fallback.
+
+```bash
+wrangler secret put INTERNAL_API_KEY
 ```
 
 ## Route Groups
@@ -535,7 +557,7 @@ wrangler secret put ADMIN_API_KEY
 | Mobile Auth | `/api/mobile/auth` | Mixed | Bootstrap (none), me/logout (Bearer) |
 | Mobile Uploads | `/api/mobile/uploads` | Bearer | Request presigned URLs + confirm uploads |
 | Mobile Assets | `/api/mobile/assets` | Bearer | List/view own assets |
-| Mobile Filters | `/api/mobile/filters` | None | Browse active filters |
+| Mobile Filters | `/api/mobile/filters` | Bearer | Browse active filters |
 | Mobile Generations | `/api/mobile/generations` | Bearer | Submit and track generation jobs |
 | Mobile Billing | `/api/mobile/billing` | Bearer | Billing state, coins, entitlements |
 | Mobile Devices | `/api/mobile/devices` | Bearer | Register push notification tokens |
@@ -546,9 +568,9 @@ wrangler secret put ADMIN_API_KEY
 | Admin Filters | `/api/admin/filters` | Admin | Filter CRUD |
 | Admin Billing | `/api/admin/billing` | Admin | Product CRUD, coin ops, events |
 | Admin Settings | `/api/admin/settings` | Admin | Key-value config store |
-| Internal Generations | `/api/internal/generations` | None* | Job sync (single + batch) |
+| Internal Generations | `/api/internal/generations` | Internal | Job sync (single + batch) |
 
-\* Internal routes are service-to-service. Secure with shared secret or Cloudflare Access in production.
+\* Internal routes require the `X-Internal-Key` header with the `INTERNAL_API_KEY` secret.
 
 | Trigger | Schedule | Description |
 |---------|----------|-------------|
@@ -603,6 +625,7 @@ All endpoints return consistent JSON:
 | `ATLASCLOUD_API_KEY` | Secret | Atlas Cloud API key for generation |
 | `REVENUECAT_WEBHOOK_SECRET` | Secret | RevenueCat webhook Bearer token |
 | `ADMIN_API_KEY` | Secret | Admin panel API key (`X-Admin-Key` header) |
+| `INTERNAL_API_KEY` | Secret | Internal route API key (`X-Internal-Key` header) |
 
 ## Development
 
@@ -624,9 +647,10 @@ wrangler secret put R2_ACCOUNT_ID
 # Set provider API keys
 wrangler secret put ATLASCLOUD_API_KEY
 
-# Set billing/admin secrets
+# Set billing/admin/internal secrets
 wrangler secret put REVENUECAT_WEBHOOK_SECRET
 wrangler secret put ADMIN_API_KEY
+wrangler secret put INTERNAL_API_KEY
 
 # Deploy
 npm run deploy
@@ -693,9 +717,8 @@ admin product CRUD validation.
 5. **Token refresh** — Optional if 90-day expiry proves insufficient
 6. **Reference image support** — Multi-image input for providers that support it
 7. **Second provider** — fal.ai adapter using the same provider router
-8. **Internal route auth** — Shared secret or Cloudflare Access for service-to-service routes
-9. **Scheduled cleanup** — Cron trigger for stale queued jobs and orphaned assets
-10. **Asset deletion** — Allow users to delete their own assets (R2 + D1 cleanup)
+8. **Scheduled cleanup** — Cron trigger for stale queued jobs and orphaned assets
+9. **Asset deletion** — Allow users to delete their own assets (R2 + D1 cleanup)
 
 ### Intentionally Deferred (Not in Current Implementation)
 
@@ -712,3 +735,38 @@ admin product CRUD validation.
 - Advanced financial reporting / full refund reconciliation
 - Mobile RevenueCat SDK integration (client-side)
 - Webhook signature verification beyond shared Bearer secret
+
+## Security Hardening Progress
+
+### Completed (Pass 1)
+
+- ✅ **Internal routes protected** — `requireInternal` middleware with `INTERNAL_API_KEY` shared secret, timing-safe comparison, always fail-closed
+- ✅ **Mobile device routes auth** — `requireAuth` applied, consistent with all other mobile endpoints
+- ✅ **Mobile filter routes auth** — `requireAuth` applied, response shape remains client-safe
+- ✅ **Auth fallback hardened** — dev auth bypass uses explicit allowlist (`development`, `test`), missing/unknown `ENVIRONMENT` is treated as production
+- ✅ **Admin fallback hardened** — same explicit allowlist approach, missing key in non-dev returns 500
+- ✅ **Upload confirm response normalized** — now uses `toClientAsset()`, no longer leaks `storage_key` or `user_id`
+- ✅ **Coin idempotency guard fixed** — secondary check now queries via `billing_events.rc_event_id` JOIN instead of freshly generated UUID
+- ✅ **Security logging** — denied auth attempts (admin, internal) and suspicious dev auth bypass attempts are logged
+
+### Remaining (Pass 2)
+
+- Rate limiting on bootstrap, uploads, and generation endpoints
+- Concurrency-safe generation debit (atomic balance check + debit)
+- Device attestation (Play Integrity / App Attest)
+- Stale pending asset cleanup cron
+- Orphan R2 object cleanup on admin delete
+- Structured observability (audit log table, request metadata)
+- Admin auth upgrade from shared secret to role-based access
+- CORS configuration for admin web panel
+
+### Production Deployment Checklist
+
+Before deploying to production, verify:
+
+1. `ENVIRONMENT` is set to `production` (controls auth fallback behavior)
+2. `ADMIN_API_KEY` is set via `wrangler secret put` (strong random value)
+3. `INTERNAL_API_KEY` is set via `wrangler secret put` (strong random value)
+4. `REVENUECAT_WEBHOOK_SECRET` is set and matches RevenueCat dashboard
+5. All R2 and provider API keys are configured
+6. `.dev.vars` is NOT committed to git (verify with `git status`)

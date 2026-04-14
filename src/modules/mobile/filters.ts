@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import type { AppEnv } from "../../bindings";
+import type { AuthedEnv } from "../../middleware/auth";
+import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import type { FilterRow } from "../../core/db/schema";
@@ -20,7 +21,10 @@ function toClientFilter(row: FilterRow) {
 	};
 }
 
-const filters = new Hono<AppEnv>();
+const filters = new Hono<AuthedEnv>();
+
+// All filter routes require authentication
+filters.use("/*", requireAuth);
 
 /** List active filters for mobile clients */
 filters.get("/", async (c) => {

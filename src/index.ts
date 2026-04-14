@@ -24,6 +24,7 @@ import { adminBillingRoutes } from "./modules/admin/billing";
 import { revenuecatWebhookRoutes } from "./modules/webhooks/revenuecat";
 import { handleScheduled } from "./core/generation/scheduled";
 import { requireAdmin } from "./middleware/admin-auth";
+import { requireInternal } from "./middleware/internal-auth";
 
 const app = new Hono<AppEnv>();
 
@@ -75,7 +76,8 @@ app.route("/api/admin/filters", adminFilterRoutes);
 app.route("/api/admin/settings", adminSettingRoutes);
 app.route("/api/admin/billing", adminBillingRoutes);
 
-// Internal routes (service-to-service, not client-facing)
+// Internal routes (service-to-service, require shared secret)
+app.use("/api/internal/*", requireInternal);
 app.route("/api/internal/generations", internalGenerationRoutes);
 
 // Webhook routes (external service callbacks, not client-facing)

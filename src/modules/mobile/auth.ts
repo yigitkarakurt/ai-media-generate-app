@@ -8,6 +8,7 @@ import { AppError } from "../../shared/errors";
 import { bootstrapAuth } from "../../core/auth/bootstrap";
 import { hashToken, revokeSessionByTokenHash } from "../../core/auth/sessions";
 import type { UserRow } from "../../core/db/schema";
+import { checkRateLimit } from "../../lib/rate-limit";
 
 /* ──────────────── Validation ──────────────── */
 
@@ -32,6 +33,14 @@ const publicRoutes = new Hono<AppEnv>();
  * a session token the client uses for all subsequent requests.
  */
 publicRoutes.post("/bootstrap", async (c) => {
+	// Rate limit: 10 bootstrap requests per IP per 60 seconds
+	const clientIp = c.req.header("CF-Connecting-IP") ?? c.req.header("X-Forwarded-For") ?? "unknown";
+	const rl = checkRateLimit("bootstrap", clientIp, { maxRequests: 10, windowSeconds: 60 });
+	if (!rl.allowed) {
+		console.warn(`[security:rate-limit] Bootstrap rate limited: ip=${clientIp}`);
+		throw AppError.tooManyRequests("Too many bootstrap requests. Please try again later.");
+	}
+
 	const body = await c.req.json();
 	const data = bootstrapSchema.parse(body);
 	const result = await bootstrapAuth(c.env.DB, data);

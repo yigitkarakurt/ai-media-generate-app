@@ -29,6 +29,10 @@ export class AppError extends Error {
 		return new AppError("CONFLICT", message, 409);
 	}
 
+	static tooManyRequests(message = "Too many requests, please try again later") {
+		return new AppError("RATE_LIMITED", message, 429);
+	}
+
 	static internal(message = "Internal server error") {
 		return new AppError("INTERNAL_ERROR", message, 500);
 	}

@@ -16,6 +16,8 @@ export interface AppBindings {
 	REVENUECAT_WEBHOOK_SECRET: string;
 	// Admin API key (set via `wrangler secret put ADMIN_API_KEY`)
 	ADMIN_API_KEY: string;
+	// Internal service-to-service auth key (set via `wrangler secret put INTERNAL_API_KEY`)
+	INTERNAL_API_KEY: string;
 }
 
 export interface AppEnv {

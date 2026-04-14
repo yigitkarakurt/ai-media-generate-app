@@ -23,6 +23,7 @@ export default defineConfig({
 					MIGRATIONS: migrations,
 					ENVIRONMENT: "test",
 					ADMIN_API_KEY: "test-admin-key",
+					INTERNAL_API_KEY: "test-internal-key",
 					REVENUECAT_WEBHOOK_SECRET: "test-revenuecat-secret",
 					ATLASCLOUD_API_KEY: "test-atlas-key",
 					R2_ACCESS_KEY_ID: "test-r2-access-key",

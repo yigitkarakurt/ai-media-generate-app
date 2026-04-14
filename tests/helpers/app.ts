@@ -17,6 +17,12 @@ export function adminHeaders(init?: HeadersInit): Headers {
 	return headers;
 }
 
+export function internalHeaders(init?: HeadersInit): Headers {
+	const headers = new Headers(init);
+	headers.set("X-Internal-Key", env.INTERNAL_API_KEY);
+	return headers;
+}
+
 export function authHeaders(token: string, init?: HeadersInit): Headers {
 	const headers = new Headers(init);
 	headers.set("Authorization", `Bearer ${token}`);

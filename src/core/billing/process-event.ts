@@ -6,8 +6,9 @@ import {
 	getProductByRCId,
 	getEventByRCId,
 	buildInsertEventStatement,
-	hasCoinEntryForEvent,
+	hasCoinEntryForRCEvent,
 } from "./queries";
+import { buildWalletCredit, buildWalletDebit } from "./wallet";
 
 /* ──────────────── Main processor ──────────────── */
 
@@ -90,10 +91,11 @@ export async function processRevenueCatEvent(
 				);
 			}
 			if (product.type === "coin_pack" && product.coin_amount) {
-				const alreadyGranted = await hasCoinEntryForEvent(db, eventId);
+				const alreadyGranted = await hasCoinEntryForRCEvent(db, rcEventId);
 				if (!alreadyGranted) {
 					sideEffects.push(
 						buildCoinCredit(db, userId, product.coin_amount, eventId, `Purchased ${product.name}`),
+						buildWalletCredit(db, userId, product.coin_amount),
 					);
 				}
 			}
@@ -107,10 +109,11 @@ export async function processRevenueCatEvent(
 				break;
 			}
 			if (product.type === "coin_pack" && product.coin_amount) {
-				const alreadyGranted = await hasCoinEntryForEvent(db, eventId);
+				const alreadyGranted = await hasCoinEntryForRCEvent(db, rcEventId);
 				if (!alreadyGranted) {
 					sideEffects.push(
 						buildCoinCredit(db, userId, product.coin_amount, eventId, `Purchased ${product.name}`),
+						buildWalletCredit(db, userId, product.coin_amount),
 					);
 				}
 			}
@@ -122,7 +125,7 @@ export async function processRevenueCatEvent(
 			// a refund/revocation occurred (could be coin_pack or subscription).
 			if (product && product.type === "coin_pack" && product.coin_amount) {
 				// Coin-pack cancellation = refund. Create negative compensating entry.
-				const alreadyRefunded = await hasCoinEntryForEvent(db, eventId);
+				const alreadyRefunded = await hasCoinEntryForRCEvent(db, rcEventId);
 				if (!alreadyRefunded) {
 					sideEffects.push(
 						buildCoinDebit(
@@ -132,6 +135,7 @@ export async function processRevenueCatEvent(
 							eventId,
 							`Refund: ${product.name}`,
 						),
+						buildWalletDebit(db, userId, product.coin_amount),
 					);
 				}
 			} else {

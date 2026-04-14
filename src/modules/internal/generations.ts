@@ -3,8 +3,8 @@ import type { AppEnv } from "../../bindings";
 import { success } from "../../shared/api-response";
 import { syncGenerationJob, syncPendingJobs } from "../../core/generation/sync";
 
-// Internal routes are service-to-service (not client-facing).
-// In production, secure with a shared secret header or Cloudflare Access.
+// Internal routes are service-to-service.
+// Auth is applied via requireInternal middleware in index.ts.
 const internalGenerations = new Hono<AppEnv>();
 
 /**

@@ -10,7 +10,9 @@ import { GENERATION_STATUSES, isValidGenerationStatus } from "../../core/generat
 import { dispatchGeneration } from "../../core/generation/dispatch";
 import { createPresignedReadUrl } from "../../lib/r2";
 import { toClientAsset } from "../../core/assets/client";
-import { getCoinBalance, createGenerationDebit, refundGenerationDebit } from "../../core/billing/queries";
+import { createGenerationDebit, refundGenerationDebit } from "../../core/billing/queries";
+import { atomicDebit, ensureWallet, getWalletBalance, creditWallet } from "../../core/billing/wallet";
+import { checkRateLimit } from "../../lib/rate-limit";
 
 /* ──────────────── Validation schemas ──────────────── */
 
@@ -59,10 +61,18 @@ generations.use("/*", requireAuth);
  * creates a job record, then dispatches to the provider stub.
  */
 generations.post("/", async (c) => {
-	const body = await c.req.json();
-	const data = createGenerationSchema.parse(body);
 	const userId = c.get("userId");
 	const db = c.env.DB;
+
+	// Rate limit: 5 generation requests per user per 60 seconds
+	const rl = checkRateLimit("generation", userId, { maxRequests: 5, windowSeconds: 60 });
+	if (!rl.allowed) {
+		console.warn(`[security:rate-limit] Generation rate limited: user=${userId}`);
+		throw AppError.tooManyRequests("Too many generation requests. Please try again later.");
+	}
+
+	const body = await c.req.json();
+	const data = createGenerationSchema.parse(body);
 
 	/* ── Verify input asset ── */
 	const asset = await db
@@ -116,14 +126,20 @@ generations.post("/", async (c) => {
 		);
 	}
 
-	/* ── Coin debit check ── */
+	/* ── Atomic coin debit ── */
 	const coinCost = filter.coin_cost ?? 0;
 	if (coinCost > 0) {
-		const balance = await getCoinBalance(db, userId);
-		if (balance < coinCost) {
+		// Ensure wallet exists for this user
+		await ensureWallet(db, userId);
+
+		// Atomic debit: UPDATE WHERE balance >= cost (prevents concurrent overspend)
+		const debited = await atomicDebit(db, userId, coinCost);
+		if (!debited) {
+			const currentBalance = await getWalletBalance(db, userId);
+			console.warn(`[security:billing] Insufficient coins: user=${userId}, cost=${coinCost}, balance=${currentBalance}`);
 			throw AppError.badRequest(
 				"INSUFFICIENT_COINS",
-				`This generation costs ${coinCost} coins but your balance is ${balance}.`,
+				`This generation costs ${coinCost} coins but your balance is ${currentBalance}.`,
 			);
 		}
 	}
@@ -151,7 +167,7 @@ generations.post("/", async (c) => {
 		)
 		.run();
 
-	/* ── Debit coins (after job created, before dispatch) ── */
+	/* ── Append ledger entry for audit trail (wallet already debited) ── */
 	if (coinCost > 0) {
 		await createGenerationDebit(db, userId, coinCost, jobId);
 	}
@@ -199,8 +215,9 @@ generations.post("/", async (c) => {
 			)
 			.run();
 
-		// Refund debited coins on dispatch failure
+		// Refund debited coins on dispatch failure (wallet + ledger)
 		if (coinCost > 0) {
+			await creditWallet(db, userId, coinCost);
 			await refundGenerationDebit(db, userId, coinCost, jobId);
 		}
 

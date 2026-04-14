@@ -175,6 +175,19 @@ export async function insertCoinEntry(
 		)
 		.run();
 
+	// Keep user_wallets in sync with coin_ledger
+	const now = nowIso();
+	await db
+		.prepare(
+			`INSERT INTO user_wallets (user_id, balance, updated_at)
+			 VALUES (?, ?, ?)
+			 ON CONFLICT(user_id) DO UPDATE SET
+				balance = balance + ?,
+				updated_at = ?`,
+		)
+		.bind(userId, amount, now, amount, now)
+		.run();
+
 	return row;
 }
 

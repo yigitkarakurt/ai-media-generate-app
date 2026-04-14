@@ -12,6 +12,8 @@ import {
 } from "../../shared/media";
 import { createPresignedUploadUrl } from "../../lib/r2";
 import type { AssetRow } from "../../core/db/schema";
+import { toClientAsset } from "../../core/assets/client";
+import { checkRateLimit } from "../../lib/rate-limit";
 
 /* ──────────────── Validation schemas ──────────────── */
 
@@ -45,10 +47,18 @@ uploads.use("/*", requireAuth);
  * Client then uploads the file directly to R2 using that URL.
  */
 uploads.post("/request", async (c) => {
-	const body = await c.req.json();
-	const data = uploadRequestSchema.parse(body);
 	const userId = c.get("userId");
 	const db = c.env.DB;
+
+	// Rate limit: 20 upload requests per user per 60 seconds
+	const rl = checkRateLimit("upload-request", userId, { maxRequests: 20, windowSeconds: 60 });
+	if (!rl.allowed) {
+		console.warn(`[security:rate-limit] Upload request rate limited: user=${userId}`);
+		throw AppError.tooManyRequests("Too many upload requests. Please try again later.");
+	}
+
+	const body = await c.req.json();
+	const data = uploadRequestSchema.parse(body);
 
 	// Validate mime type
 	if (!isAllowedMimeType(data.mimeType)) {
@@ -70,6 +80,19 @@ uploads.post("/request", async (c) => {
 	const mediaType = mediaTypeFromMime(data.mimeType);
 	const storageKey = generateStorageKey("input", userId, assetId, data.filename);
 	const now = new Date().toISOString();
+
+	// Cap pending assets per user to prevent unbounded growth
+	const pendingCount = await db
+		.prepare("SELECT COUNT(*) as count FROM assets WHERE user_id = ? AND status = 'pending'")
+		.bind(userId)
+		.first<{ count: number }>();
+	if ((pendingCount?.count ?? 0) >= 10) {
+		console.warn(`[security:abuse] Pending asset cap reached: user=${userId}, count=${pendingCount?.count}`);
+		throw AppError.badRequest(
+			"TOO_MANY_PENDING_UPLOADS",
+			"You have too many pending uploads. Please complete or wait for existing uploads to expire.",
+		);
+	}
 
 	// Create pending asset record
 	await db
@@ -172,13 +195,14 @@ uploads.post("/confirm", async (c) => {
 		)
 		.run();
 
-	// Fetch updated asset
+	// Fetch updated asset and return client-safe shape
 	const updated = await db
 		.prepare("SELECT * FROM assets WHERE id = ?")
 		.bind(data.assetId)
 		.first<AssetRow>();
 
-	return success(c, updated);
+	const clientAsset = await toClientAsset(updated!, c.env);
+	return success(c, clientAsset);
 });
 
 export { uploads as mobileUploadRoutes };

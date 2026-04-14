@@ -170,16 +170,31 @@ export async function insertCoinEntry(
 		.run();
 }
 
-export async function hasCoinEntryForEvent(
+/**
+ * Check if a coin ledger entry already exists for a given RevenueCat event ID.
+ *
+ * Used as a secondary idempotency guard in webhook processing.
+ * Joins through billing_events to match on the stable RC event ID,
+ * since coin_ledger.billing_event_id references billing_events.id (internal UUID).
+ */
+export async function hasCoinEntryForRCEvent(
 	db: D1Database,
-	billingEventId: string,
+	rcEventId: string,
 ): Promise<boolean> {
 	const row = await db
-		.prepare("SELECT id FROM coin_ledger WHERE billing_event_id = ? LIMIT 1")
-		.bind(billingEventId)
+		.prepare(
+			`SELECT cl.id FROM coin_ledger cl
+			 JOIN billing_events be ON cl.billing_event_id = be.id
+			 WHERE be.rc_event_id = ?
+			 LIMIT 1`,
+		)
+		.bind(rcEventId)
 		.first<{ id: string }>();
 	return row !== null;
 }
+
+/** @deprecated Use hasCoinEntryForRCEvent instead */
+export const hasCoinEntryForEvent = hasCoinEntryForRCEvent;
 
 /* ──────────────── Compensating / debit coin entries ──────────────── */
 
