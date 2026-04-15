@@ -12,6 +12,7 @@ export interface AppBindings {
 	R2_BUCKET_NAME: string;
 	// Provider API keys
 	ATLASCLOUD_API_KEY: string;
+	OPENROUTER_API_KEY: string;
 	// RevenueCat webhook verification
 	REVENUECAT_WEBHOOK_SECRET: string;
 	// Admin API key (set via `wrangler secret put ADMIN_API_KEY`)

@@ -48,6 +48,13 @@ export interface DispatchResult {
 	providerJobId: string;
 	/** The status the provider reports immediately after submission. */
 	initialStatus: GenerationStatus;
+	/**
+	 * Output asset ID, set only by synchronous providers that complete inline
+	 * (e.g. OpenRouter). When present, the route handler writes it into the
+	 * generation_jobs row alongside the other dispatch result fields.
+	 * Atlas and other async providers leave this undefined.
+	 */
+	outputAssetId?: string;
 }
 
 /**

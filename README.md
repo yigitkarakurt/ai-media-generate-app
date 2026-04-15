@@ -45,8 +45,13 @@ src/
 │       ├── sync.ts                  # Job sync logic (single + batch) + output handling
 │       ├── scheduled.ts             # Cron trigger handler for automatic batch sync
 │       └── providers/
-│           ├── index.ts             # Provider registry
-│           └── atlas.ts             # Atlas Cloud adapter (submit + status polling)
+│           ├── index.ts             # Provider registry (atlas, openrouter)
+│           ├── atlas.ts             # Atlas Cloud adapter (submit + status polling)
+│           └── openrouter/
+│               ├── index.ts         # OpenRouter provider (synchronous, inline-complete)
+│               ├── types.ts         # OpenRouter API types + ModelAdapter interface
+│               └── adapters/
+│                   └── seedream-4-5.ts  # Seedream 4.5 request builder (text_to_image + image_to_image)
 │
 └── modules/
     ├── health/
@@ -219,10 +224,121 @@ Filter (provider_name: "atlas")
         → getProvider("atlas")
             → atlasProvider.submit(ctx)
                 → POST https://api.atlascloud.ai/...
+
+Filter (provider_name: "openrouter")
+    → dispatch.ts (router)
+        → getProvider("openrouter")
+            → openrouterProvider.submit(ctx)
+                → resolves model adapter (Seedream45Adapter for bytedance-seed/seedream-4.5)
+                → adapter.buildRequest(ctx)  ← model-specific request shaping
+                → POST https://openrouter.ai/api/v1/chat/completions
+                → parse data URL → write R2 → insert output asset → return completed
 ```
 
-Adding a new provider means creating a new adapter file (e.g., `providers/fal.ts`), implementing
-`GenerationProvider`, and registering it in the provider registry.
+Adding a new provider: create `providers/<name>/index.ts`, implement `GenerationProvider`,
+register in `providers/index.ts`.
+
+Adding a new OpenRouter model: create `providers/openrouter/adapters/<model>.ts`, implement
+`ModelAdapter`, add to `adapterRegistry` in `providers/openrouter/index.ts`.
+
+## OpenRouter Provider — Seedream 4.5
+
+### Overview
+
+OpenRouter is the second generation provider. Unlike Atlas (async + polling), OpenRouter
+image generation with `bytedance-seed/seedream-4.5` is **synchronous**: the API returns
+the generated image in the same HTTP response as a base64 data URL.
+
+The backend decodes this data URL, writes the raw bytes to R2, creates an output asset row
+in D1, and returns `status = "completed"` in the same request lifecycle. No polling or
+scheduled sync is needed for OpenRouter jobs.
+
+The mobile client is completely unaware of OpenRouter — it only ever sees normalized job
+statuses and output asset IDs, exactly as with Atlas.
+
+### Supported operations
+
+| Operation | Behaviour |
+|-----------|-----------|
+| `text_to_image` | Sends text prompt only. `modalities: ["image"]`. |
+| `image_to_image` | Sends text prompt + signed R2 read URL for the input image. The provider fetches the input directly from R2. |
+
+The operation is controlled by the filter's `config` JSON column (`operation_type` key).
+The mobile client never sets this.
+
+### Filter configuration
+
+To target OpenRouter with Seedream 4.5, set the following on a filter (via admin API):
+
+| Field | Value |
+|-------|-------|
+| `provider_name` | `openrouter` |
+| `provider_model_id` | `bytedance-seed/seedream-4.5` |
+| `config` | `{"operation_type":"text_to_image"}` or `{"operation_type":"image_to_image"}` |
+| `prompt_template` | Backend-controlled prompt text |
+| `input_media_types` | `image` (video not supported for this adapter) |
+
+Example admin API call:
+```bash
+curl -X POST http://localhost:8787/api/admin/filters \
+  -H "X-Admin-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Dreamlike Style",
+    "slug": "dreamlike-style",
+    "description": "AI-powered dreamlike artistic transformation",
+    "provider_name": "openrouter",
+    "provider_model_id": "bytedance-seed/seedream-4.5",
+    "config": "{\"operation_type\":\"image_to_image\"}",
+    "prompt_template": "Transform this photo into a dreamlike artistic painting",
+    "input_media_types": "image",
+    "coin_cost": 5
+  }'
+```
+
+### Data URL output handling
+
+OpenRouter returns generated images as data URLs:
+```
+data:image/jpeg;base64,/9j/4AAQ...
+```
+
+The backend:
+1. Validates the `data:` prefix and `;base64,` encoding marker
+2. Extracts the mime type (`image/jpeg`, `image/png`, etc.)
+3. Decodes the base64 payload with `atob()`
+4. Writes raw bytes directly to R2 (no network fetch needed)
+5. Creates an output asset row in D1 (`kind='output'`, `status='ready'`)
+6. Returns `initialStatus="completed"` immediately
+
+### ModelAdapter extensibility
+
+Every OpenRouter model has its own adapter file:
+
+```
+providers/openrouter/adapters/
+    seedream-4-5.ts      ← bytedance-seed/seedream-4.5 (text_to_image + image_to_image)
+    <future-model>.ts    ← next model, different request/response shape
+```
+
+The `OpenRouterProvider` handles all shared concerns (auth, HTTP, data URL parsing, R2 write,
+D1 insert). Each `ModelAdapter` only implements `buildRequest(ctx)`. This prevents model-specific
+quirks from leaking into the route handler or cross-contaminating other models.
+
+### Current limitation: single primary image for image_to_image
+
+`Seedream45Adapter` currently uses **only the first URL** from `inputImageUrls[0]`.
+The `DispatchRequest.inputImageUrls` field is already an array, so the architecture supports
+multi-image input, but full reference-image behavior is deferred.
+
+### Deferred for future OpenRouter work
+
+- Additional OpenRouter models (one new adapter file each)
+- Multi-image reference input for Seedream 4.5
+- `usage.cost` persistence from the OpenRouter response
+- Video generation endpoints (not in scope for this provider)
+
+
 
 ### Prompt Rules
 
@@ -623,6 +739,7 @@ All endpoints return consistent JSON:
 | `R2_SECRET_ACCESS_KEY` | Secret | R2 S3 API secret key |
 | `R2_ACCOUNT_ID` | Secret | Cloudflare account ID for R2 S3 endpoint |
 | `ATLASCLOUD_API_KEY` | Secret | Atlas Cloud API key for generation |
+| `OPENROUTER_API_KEY` | Secret | OpenRouter API key for image generation |
 | `REVENUECAT_WEBHOOK_SECRET` | Secret | RevenueCat webhook Bearer token |
 | `ADMIN_API_KEY` | Secret | Admin panel API key (`X-Admin-Key` header) |
 | `INTERNAL_API_KEY` | Secret | Internal route API key (`X-Internal-Key` header) |
@@ -646,6 +763,7 @@ wrangler secret put R2_ACCOUNT_ID
 
 # Set provider API keys
 wrangler secret put ATLASCLOUD_API_KEY
+wrangler secret put OPENROUTER_API_KEY
 
 # Set billing/admin/internal secrets
 wrangler secret put REVENUECAT_WEBHOOK_SECRET
@@ -712,13 +830,12 @@ admin product CRUD validation.
 
 1. **Account linking** — Apple/Google/email login, merging anonymous accounts
 2. **Push notifications** — Notify users when generation completes/fails
-3. **Rate limiting** — Per-endpoint limits on bootstrap, generations, uploads
-4. **Play Integrity / App Attest** — Device attestation checks (columns ready)
-5. **Token refresh** — Optional if 90-day expiry proves insufficient
-6. **Reference image support** — Multi-image input for providers that support it
-7. **Second provider** — fal.ai adapter using the same provider router
-8. **Scheduled cleanup** — Cron trigger for stale queued jobs and orphaned assets
-9. **Asset deletion** — Allow users to delete their own assets (R2 + D1 cleanup)
+3. **Play Integrity / App Attest** — Device attestation checks (columns ready)
+4. **Token refresh** — Optional if 90-day expiry proves insufficient
+5. **Additional OpenRouter models** — Add new `adapters/<model>.ts` + registry entry
+6. **Multi-image reference input** — Architecture is ready (`inputImageUrls` is already an array)
+7. **Asset deletion** — Allow users to delete their own assets (R2 + D1 cleanup)
+8. **Scheduled cleanup** — Cron trigger for stale queued jobs and orphaned R2 objects
 
 ### Intentionally Deferred (Not in Current Implementation)
 
@@ -728,9 +845,11 @@ admin product CRUD validation.
 - Multi-device session management UI
 - Token refresh mechanism
 - Push notifications on job completion
-- Reference image / multi-image input support
-- User-provided custom prompts (prompts come from filter config only)
-- Second provider integration (fal.ai, etc.)
+- Multi-image reference input for Seedream 4.5 (architecture ready, not wired)
+- Additional OpenRouter models beyond Seedream 4.5
+- `usage.cost` persistence from OpenRouter responses
+- Video generation (text-to-video, image-to-video) — not in scope
+- User-provided custom prompts (prompts always come from filter config only)
 - Public unauthenticated asset URLs
 - Advanced financial reporting / full refund reconciliation
 - Mobile RevenueCat SDK integration (client-side)

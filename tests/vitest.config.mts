@@ -26,6 +26,7 @@ export default defineConfig({
 					INTERNAL_API_KEY: "test-internal-key",
 					REVENUECAT_WEBHOOK_SECRET: "test-revenuecat-secret",
 					ATLASCLOUD_API_KEY: "test-atlas-key",
+					OPENROUTER_API_KEY: "test-openrouter-key",
 					R2_ACCESS_KEY_ID: "test-r2-access-key",
 					R2_SECRET_ACCESS_KEY: "test-r2-secret-key",
 					R2_ACCOUNT_ID: "test-r2-account",

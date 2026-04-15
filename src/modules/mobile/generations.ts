@@ -224,26 +224,55 @@ generations.post("/", async (c) => {
 		throw err;
 	}
 
-	// Update job with dispatch result
-	await db
-		.prepare(
-			`UPDATE generation_jobs SET
-				provider_name = ?,
-				provider_job_id = ?,
-				status = ?,
-				started_at = ?,
-				updated_at = ?
-			WHERE id = ?`,
-		)
-		.bind(
-			dispatchResult.providerName,
-			dispatchResult.providerJobId,
-			dispatchResult.initialStatus,
-			now,
-			now,
-			jobId,
-		)
-		.run();
+	// Update job with dispatch result.
+	// Synchronous providers (e.g. OpenRouter) may return outputAssetId and
+	// initialStatus="completed" — in that case we write output_asset_id and
+	// completed_at in the same UPDATE so the job is immediately terminal.
+	if (dispatchResult.outputAssetId) {
+		await db
+			.prepare(
+				`UPDATE generation_jobs SET
+					provider_name = ?,
+					provider_job_id = ?,
+					status = ?,
+					output_asset_id = ?,
+					started_at = ?,
+					completed_at = ?,
+					updated_at = ?
+				WHERE id = ?`,
+			)
+			.bind(
+				dispatchResult.providerName,
+				dispatchResult.providerJobId,
+				dispatchResult.initialStatus,
+				dispatchResult.outputAssetId,
+				now,
+				now,
+				now,
+				jobId,
+			)
+			.run();
+	} else {
+		await db
+			.prepare(
+				`UPDATE generation_jobs SET
+					provider_name = ?,
+					provider_job_id = ?,
+					status = ?,
+					started_at = ?,
+					updated_at = ?
+				WHERE id = ?`,
+			)
+			.bind(
+				dispatchResult.providerName,
+				dispatchResult.providerJobId,
+				dispatchResult.initialStatus,
+				now,
+				now,
+				jobId,
+			)
+			.run();
+	}
 
 	/* ── Return created job ── */
 	const job = await db
