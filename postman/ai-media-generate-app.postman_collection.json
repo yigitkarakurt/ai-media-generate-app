@@ -1,1510 +1,1383 @@
 {
-	"info": {
-		"_postman_id": "8b88aa25-0c9a-4d5a-b4ce-1cf9c0ac6f9e",
-		"name": "AI Media Generate App API",
-		"description": "Postman collection for manual testing of the AI Media Generate Cloudflare Workers backend.\n\n**Auth model:**\n- Mobile routes use `Authorization: Bearer {session_token}` obtained from the bootstrap endpoint.\n- Admin routes use `X-Admin-Key: {ADMIN_API_KEY}` shared secret.\n- Internal routes have no built-in auth (secured at the network level).\n- The RevenueCat webhook uses `Authorization: Bearer {REVENUECAT_WEBHOOK_SECRET}`.\n\nRun `Mobile / Auth / Bootstrap Anonymous Auth` first, then copy the returned `session_token` into the `authToken` environment variable (the test script does this automatically).",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"item": [
-		{
-			"name": "Health",
-			"description": "Public service health and version checks. No authentication required.",
-			"item": [
-				{
-					"name": "Health Check",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"pm.test(\"returns success\", function () {",
-									"  var json = pm.response.json();",
-									"  pm.expect(json.success).to.eql(true);",
-									"  pm.expect(json.data.status).to.eql(\"ok\");",
-									"});"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [],
-						"description": "GET `/api/health`. Public health probe.\n\nExpected response: `{ success: true, data: { status: \"ok\", timestamp } }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/health",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "health"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Version",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"description": "GET `/api/version`. Public version and environment info.\n\nExpected response: `{ success: true, data: { version, environment } }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/version",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "version"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Auth",
-			"description": "Anonymous auth bootstrap and session management. The bootstrap endpoint is the first call on app launch — it creates an anonymous user and returns a session token used for all subsequent mobile requests.",
-			"item": [
-				{
-					"name": "Bootstrap Anonymous Auth",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"pm.test(\"bootstrap returns token\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  var json = pm.response.json();",
-									"  pm.expect(json.success).to.eql(true);",
-									"  pm.expect(json.data.session_token).to.be.a(\"string\");",
-									"});",
-									"",
-									"var json = pm.response.json();",
-									"if (json.success && json.data) {",
-									"  pm.environment.set(\"authToken\", json.data.session_token);",
-									"  pm.environment.set(\"userId\", json.data.user_id);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"description": "POST `/api/mobile/auth/bootstrap`. Public endpoint — no auth required.\n\nCreates an anonymous user and returns a session token. The test script automatically sets `authToken` and `userId` environment variables.\n\nRequired fields: `installation_id`, `platform` (ios|android), `app_version`.\nOptional fields: `device_identifier`, `device_model`, `os_version`.",
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"installation_id\": \"{{installationId}}\",\n  \"platform\": \"ios\",\n  \"app_version\": \"1.0.0\",\n  \"device_identifier\": \"{{deviceIdentifier}}\",\n  \"device_model\": \"iPhone 15 Pro\",\n  \"os_version\": \"18.0\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/auth/bootstrap",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "auth", "bootstrap"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Current User (Me)",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/auth/me`. Returns the authenticated user's basic info.\n\nRequires `Authorization: Bearer {token}`.\n\nExpected response: `{ success: true, data: { id, is_anonymous, created_at } }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/auth/me",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "auth", "me"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Logout",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token to revoke."
-							}
-						],
-						"description": "POST `/api/mobile/auth/logout`. Revokes the current session token.\n\nAfter logout, the `authToken` is no longer valid. Run Bootstrap again to get a new one.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/auth/logout",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "auth", "logout"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Filters",
-			"description": "Mobile-safe active filter catalog. These routes are currently public (no auth required).",
-			"item": [
-				{
-					"name": "List Active Filters",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"pm.test(\"returns paginated success\", function () {",
-									"  var json = pm.response.json();",
-									"  pm.expect(json.success).to.eql(true);",
-									"  pm.expect(json.data).to.be.an(\"array\");",
-									"});",
-									"",
-									"var json = pm.response.json();",
-									"if (json.success && json.data && json.data.length > 0) {",
-									"  pm.environment.set(\"filterId\", json.data[0].id);",
-									"  pm.environment.set(\"filterSlug\", json.data[0].slug);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [],
-						"description": "GET `/api/mobile/filters`. Lists active filters only.\n\nQuery params: `page` (default 1), `pageSize` (default 20, max 100).\n\nThe test script auto-sets `filterId` and `filterSlug` from the first result.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/filters?page={{page}}&pageSize={{pageSize}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "filters"],
-							"query": [
-								{ "key": "page", "value": "{{page}}" },
-								{ "key": "pageSize", "value": "{{pageSize}}" }
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Filter by Slug",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"description": "GET `/api/mobile/filters/:slug`. Returns a single filter by slug.\n\nUses `filterSlug` set by List Active Filters or Admin Create Filter.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/filters/{{filterSlug}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "filters", "{{filterSlug}}"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Uploads",
-			"description": "Authenticated mobile upload flow. The backend creates an input asset and returns a presigned R2 PUT URL. The actual file upload goes directly to R2 (not the Worker).\n\nRequires `Authorization: Bearer {token}` from bootstrap.",
-			"item": [
-				{
-					"name": "Request Upload URL",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"pm.test(\"created upload request\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  var json = pm.response.json();",
-									"  pm.expect(json.success).to.eql(true);",
-									"  pm.expect(json.data.assetId).to.be.a(\"string\");",
-									"  pm.expect(json.data.uploadUrl).to.be.a(\"string\");",
-									"});",
-									"",
-									"var json = pm.response.json();",
-									"if (json.success && json.data) {",
-									"  pm.environment.set(\"assetId\", json.data.assetId);",
-									"  pm.environment.set(\"uploadUrl\", json.data.uploadUrl);",
-									"  pm.environment.set(\"storageKey\", json.data.storageKey);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "POST `/api/mobile/uploads/request`. Creates a pending input asset and returns a presigned R2 PUT URL.\n\nValidation:\n- `filename`: 1–255 chars\n- `mimeType`: must be one of image/jpeg, image/png, image/webp, image/heic, image/heif, video/mp4, video/quicktime, video/webm\n- `fileSizeBytes`: positive integer, max 104857600 (100 MB)\n\nThe test script auto-sets `assetId`, `uploadUrl`, and `storageKey`.",
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"filename\": \"{{uploadFilename}}\",\n  \"mimeType\": \"{{uploadMimeType}}\",\n  \"fileSizeBytes\": {{uploadFileSizeBytes}}\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/uploads/request",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "uploads", "request"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Upload File to Signed R2 URL",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "{{uploadMimeType}}"
-							}
-						],
-						"description": "PUT `{{uploadUrl}}`. **This is NOT a Worker route** — it uploads the binary file directly to the presigned R2 URL returned by `Request Upload URL`.\n\n**Manual step:** Select a local file in Postman's Body > Binary file picker before sending.\n\nThe signed URL expires after ~600 seconds. If it expires, rerun `Request Upload URL`.",
-						"body": {
-							"mode": "file",
-							"file": {
-								"src": ""
-							}
-						},
-						"url": "{{uploadUrl}}"
-					},
-					"response": []
-				},
-				{
-					"name": "Confirm Upload",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"pm.test(\"asset is uploaded\", function () {",
-									"  var json = pm.response.json();",
-									"  pm.expect(json.success).to.eql(true);",
-									"  pm.expect(json.data.status).to.eql(\"uploaded\");",
-									"});"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "POST `/api/mobile/uploads/confirm`. Marks a pending asset as `uploaded` after the direct R2 upload.\n\n`assetId` must be a UUID owned by the authenticated user and have status `pending`.\n\nOptional metadata: `fileSizeBytes`, `mimeType`, `width`, `height`, `durationSeconds`.",
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"assetId\": \"{{assetId}}\",\n  \"fileSizeBytes\": {{uploadFileSizeBytes}},\n  \"mimeType\": \"{{uploadMimeType}}\",\n  \"width\": 1024,\n  \"height\": 1024\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/uploads/confirm",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "uploads", "confirm"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Assets",
-			"description": "Authenticated mobile asset listing and detail reads. Responses include signed read URLs for readable assets.\n\nRequires `Authorization: Bearer {token}` from bootstrap.",
-			"item": [
-				{
-					"name": "List Assets",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/assets`. Lists the authenticated user's assets.\n\nOptional filters: `kind` (input|output), `media_type` (image|video), `status` (pending|uploaded|processing|ready|failed).\nPagination: `page`, `pageSize`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/assets?page={{page}}&pageSize={{pageSize}}&kind=input&media_type=image&status=uploaded",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "assets"],
-							"query": [
-								{ "key": "page", "value": "{{page}}" },
-								{ "key": "pageSize", "value": "{{pageSize}}" },
-								{
-									"key": "kind",
-									"value": "input",
-									"description": "input or output"
-								},
-								{
-									"key": "media_type",
-									"value": "image",
-									"description": "image or video"
-								},
-								{
-									"key": "status",
-									"value": "uploaded",
-									"description": "pending, uploaded, processing, ready, or failed"
-								}
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Input Asset",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/assets/:id`. Uses `assetId` from the upload request.\n\nReturns client-safe metadata and a signed `read_url` when status is `uploaded` or `ready`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/assets/{{assetId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "assets", "{{assetId}}"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Output Asset",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/assets/:id`. Uses `outputAssetId` from a completed generation.\n\nOutput assets normally have `kind=output` and `status=ready`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/assets/{{outputAssetId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "assets", "{{outputAssetId}}"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Generations",
-			"description": "Authenticated mobile generation submission and status reads.\n\nRequires `Authorization: Bearer {token}` from bootstrap.",
-			"item": [
-				{
-					"name": "Create Generation",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"pm.test(\"generation created\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  var json = pm.response.json();",
-									"  pm.expect(json.success).to.eql(true);",
-									"  pm.expect(json.data.id).to.be.a(\"string\");",
-									"});",
-									"",
-									"var json = pm.response.json();",
-									"if (json.success && json.data) {",
-									"  pm.environment.set(\"generationId\", json.data.id);",
-									"  if (json.data.output_asset_id) pm.environment.set(\"outputAssetId\", json.data.output_asset_id);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "POST `/api/mobile/generations`. Submits a new generation job.\n\nRequires:\n- `filter_id`: UUID of an active filter\n- `input_asset_id`: UUID of an uploaded input asset owned by the user\n- `params` (optional): provider-specific parameters\n\nValidation: filter must be active, asset must be `uploaded` status and `input` kind, asset media type must be compatible with filter's `input_media_types`, and user must have sufficient coin balance.",
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"filter_id\": \"{{filterId}}\",\n  \"input_asset_id\": \"{{assetId}}\",\n  \"params\": {\n    \"seed\": 12345\n  }\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/generations",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "generations"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Generation Detail",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"var json = pm.response.json();",
-									"if (json.success && json.data && json.data.output_asset_id) {",
-									"  pm.environment.set(\"outputAssetId\", json.data.output_asset_id);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/generations/:id`. Returns the generation job detail.\n\nIf the job is completed and has an output asset, the response includes `output_asset` with a signed `read_url`.\n\nThe test script auto-sets `outputAssetId` if present.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/generations/{{generationId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "generations", "{{generationId}}"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "List Generations",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/generations`. Lists the authenticated user's generation jobs.\n\nOptional status filter: `queued`, `processing`, `completed`, `failed`.\nPagination: `page`, `pageSize`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/generations?page={{page}}&pageSize={{pageSize}}&status={{generationStatus}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "generations"],
-							"query": [
-								{ "key": "page", "value": "{{page}}" },
-								{ "key": "pageSize", "value": "{{pageSize}}" },
-								{
-									"key": "status",
-									"value": "{{generationStatus}}",
-									"description": "queued, processing, completed, or failed"
-								}
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Billing",
-			"description": "Authenticated mobile billing state, coin balance, entitlements, product catalog, and RevenueCat customer registration.\n\nRequires `Authorization: Bearer {token}` from bootstrap.",
-			"item": [
-				{
-					"name": "Get Billing State (Me)",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/billing/me`. Returns combined billing state: coin balance + subscription info.\n\nExpected response: `{ success: true, data: { coins, subscription: { is_active, entitlement_id, product_id, expires_at } } }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/billing/me",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "billing", "me"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Coin Balance",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/billing/coins`. Returns the user's coin balance.\n\nExpected response: `{ success: true, data: { balance } }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/billing/coins",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "billing", "coins"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Entitlements",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/billing/entitlements`. Returns subscription/entitlement state.\n\nExpected response: `{ success: true, data: { is_active, entitlement_id, product_id, expires_at, unsubscribed_at } }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/billing/entitlements",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "billing", "entitlements"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "List Products",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "GET `/api/mobile/billing/products`. Lists available billing products (subscriptions and coin packs).\n\nExpected response: `{ success: true, data: [{ id, rc_product_id, type, name, coin_amount }] }`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/billing/products",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "billing", "products"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Register RevenueCat Customer",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}",
-								"description": "Session token from bootstrap."
-							}
-						],
-						"description": "POST `/api/mobile/billing/customer`. Registers or updates the RevenueCat customer mapping for the authenticated user.\n\nRequired field: `rc_app_user_id` (the RevenueCat app user ID string).",
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"rc_app_user_id\": \"{{rcAppUserId}}\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/billing/customer",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "billing", "customer"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Mobile / Devices",
-			"description": "Mobile device push-token placeholders. These routes currently return 501 responses and are not yet implemented.",
-			"item": [
-				{
-					"name": "Register Push Token",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"description": "POST `/api/mobile/devices/push-token`. **Placeholder** — returns 501.\n\nNot yet implemented. Will register a push notification token.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/devices/push-token",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "devices", "push-token"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Remove Push Token",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"description": "DELETE `/api/mobile/devices/push-token`. **Placeholder** — returns 501.\n\nNot yet implemented. Will remove a push notification token.",
-						"url": {
-							"raw": "{{baseUrl}}/api/mobile/devices/push-token",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "mobile", "devices", "push-token"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Admin",
-			"description": "**Admin-only routes.** All routes in this folder require the `X-Admin-Key` header set to the `ADMIN_API_KEY` secret.\n\nThese routes are NOT mobile-safe. Do not expose admin endpoints to client apps.",
-			"item": [
-				{
-					"name": "Dashboard",
-					"item": [
-						{
-							"name": "Dashboard Summary",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key (ADMIN_API_KEY secret)."
-									}
-								],
-								"description": "GET `/api/admin/dashboard`. Aggregate counts for users, jobs, assets, and active filters.\n\n**Admin auth required:** `X-Admin-Key` header.",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/dashboard",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "dashboard"]
-								}
-							},
-							"response": []
-						}
-					]
-				},
-				{
-					"name": "Users",
-					"item": [
-						{
-							"name": "List Users",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/users`. Lists all users with pagination.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/users?page={{page}}&pageSize={{pageSize}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "users"],
-									"query": [
-										{ "key": "page", "value": "{{page}}" },
-										{ "key": "pageSize", "value": "{{pageSize}}" }
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Get User",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/users/:id`. Get a single user by ID.\n\n**Admin auth required.** Set `adminUserId` to a real user ID from List Users.",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/users/{{adminUserId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "users", "{{adminUserId}}"]
-								}
-							},
-							"response": []
-						}
-					]
-				},
-				{
-					"name": "Jobs",
-					"item": [
-						{
-							"name": "List Jobs",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/jobs`. Lists all generation jobs with provider-internal fields.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/jobs?page={{page}}&pageSize={{pageSize}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "jobs"],
-									"query": [
-										{ "key": "page", "value": "{{page}}" },
-										{ "key": "pageSize", "value": "{{pageSize}}" }
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Get Job",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/jobs/:id`. Returns full job detail with provider-internal fields.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/jobs/{{generationId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "jobs", "{{generationId}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Cancel Job",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "POST `/api/admin/jobs/:id/cancel`. Cancels a job in `queued` or `processing` status.\n\nReturns 404 for terminal or missing jobs.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/jobs/{{generationId}}/cancel",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "jobs", "{{generationId}}", "cancel"]
-								}
-							},
-							"response": []
-						}
-					]
-				},
-				{
-					"name": "Assets",
-					"item": [
-						{
-							"name": "List Assets",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/assets`. Lists all assets with internal fields.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/assets?page={{page}}&pageSize={{pageSize}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "assets"],
-									"query": [
-										{ "key": "page", "value": "{{page}}" },
-										{ "key": "pageSize", "value": "{{pageSize}}" }
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Get Asset",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/assets/:id`. Returns internal asset fields including storage key.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/assets/{{assetId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "assets", "{{assetId}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Delete Asset",
-							"request": {
-								"method": "DELETE",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "DELETE `/api/admin/assets/:id`. Deletes the D1 row only; does not remove the R2 object.\n\n**Admin auth required. Destructive.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/assets/{{assetId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "assets", "{{assetId}}"]
-								}
-							},
-							"response": []
-						}
-					]
-				},
-				{
-					"name": "Filters",
-					"item": [
-						{
-							"name": "List Filters",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/filters`. Lists all filters including inactive, with provider-internal fields.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/filters?page={{page}}&pageSize={{pageSize}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "filters"],
-									"query": [
-										{ "key": "page", "value": "{{page}}" },
-										{ "key": "pageSize", "value": "{{pageSize}}" }
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Create Filter",
-							"event": [
-								{
-									"listen": "test",
-									"script": {
-										"type": "text/javascript",
-										"exec": [
-											"pm.test(\"filter created\", function () {",
-											"  pm.response.to.have.status(201);",
-											"  var json = pm.response.json();",
-											"  pm.expect(json.success).to.eql(true);",
-											"});",
-											"",
-											"var json = pm.response.json();",
-											"if (json.success && json.data) {",
-											"  pm.environment.set(\"filterId\", json.data.id);",
-											"  pm.environment.set(\"filterSlug\", json.data.slug);",
-											"}"
-										]
-									}
-								}
-							],
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "POST `/api/admin/filters`. Creates a new filter.\n\nRequired fields: `name`, `slug`, `category`, `provider_model_id`.\nOptional: `description`, `thumbnail_url`, `provider_name` (default \"atlas\"), `prompt_template`, `default_params_json`, `config`, `input_media_types` (default \"image\"), `is_active` (default true), `sort_order` (default 0).\n\nThe test script auto-sets `filterId` and `filterSlug`.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"name\": \"Postman Image Style\",\n  \"slug\": \"{{filterSlug}}\",\n  \"description\": \"Image-to-image test filter for local Postman runs.\",\n  \"thumbnail_url\": \"https://example.com/postman-image-style.png\",\n  \"category\": \"style\",\n  \"provider_model_id\": \"{{atlasModelId}}\",\n  \"provider_name\": \"atlas\",\n  \"prompt_template\": \"Create a polished cinematic image variation while preserving the input subject.\",\n  \"default_params_json\": {\n    \"size\": \"1024x1024\",\n    \"n\": 1,\n    \"thinking_mode\": false\n  },\n  \"config\": {\n    \"source\": \"postman\"\n  },\n  \"input_media_types\": \"image\",\n  \"is_active\": true,\n  \"sort_order\": 10\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/filters",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "filters"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Get Filter",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/filters/:id`. Returns full filter detail with provider-internal fields.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/filters/{{filterId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "filters", "{{filterId}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Update Filter",
-							"request": {
-								"method": "PATCH",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "PATCH `/api/admin/filters/:id`. Partial update — only fields present in the body are changed.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"description\": \"Updated from Postman.\",\n  \"sort_order\": 11,\n  \"is_active\": true\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/filters/{{filterId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "filters", "{{filterId}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Delete Filter",
-							"request": {
-								"method": "DELETE",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "DELETE `/api/admin/filters/:id`. Permanently deletes a filter.\n\n**Admin auth required. Destructive.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/filters/{{filterId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "filters", "{{filterId}}"]
-								}
-							},
-							"response": []
-						}
-					]
-				},
-				{
-					"name": "Settings",
-					"item": [
-						{
-							"name": "List Settings",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/settings`. Returns all admin settings ordered by key.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/settings",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "settings"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Upsert Setting",
-							"request": {
-								"method": "PUT",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "PUT `/api/admin/settings/:key`. Creates or updates a string-valued admin setting.\n\nRequired: `value`. Optional: `description`.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"value\": \"enabled\",\n  \"description\": \"Postman local test setting\"\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/settings/{{settingKey}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "settings", "{{settingKey}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Get Setting",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/settings/:key`. Returns a single setting by key.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/settings/{{settingKey}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "settings", "{{settingKey}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Delete Setting",
-							"request": {
-								"method": "DELETE",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "DELETE `/api/admin/settings/:key`. Permanently deletes a setting.\n\n**Admin auth required. Destructive.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/settings/{{settingKey}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "settings", "{{settingKey}}"]
-								}
-							},
-							"response": []
-						}
-					]
-				},
-				{
-					"name": "Billing",
-					"description": "Admin billing management: products, user billing detail, coin grants/debits, and billing events.\n\n**All routes require `X-Admin-Key` header.**",
-					"item": [
-						{
-							"name": "List Billing Products",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/billing/products`. Lists all billing products (subscriptions and coin packs).\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/products?page={{page}}&pageSize={{pageSize}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "products"],
-									"query": [
-										{ "key": "page", "value": "{{page}}" },
-										{ "key": "pageSize", "value": "{{pageSize}}" }
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Create Billing Product",
-							"event": [
-								{
-									"listen": "test",
-									"script": {
-										"type": "text/javascript",
-										"exec": [
-											"pm.test(\"product created\", function () {",
-											"  pm.response.to.have.status(201);",
-											"  var json = pm.response.json();",
-											"  pm.expect(json.success).to.eql(true);",
-											"});",
-											"",
-											"var json = pm.response.json();",
-											"if (json.success && json.data) {",
-											"  pm.environment.set(\"billingProductId\", json.data.id);",
-											"}"
-										]
-									}
-								}
-							],
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "POST `/api/admin/billing/products`. Creates a new billing product.\n\nRequired: `rc_product_id`, `type` (subscription|coin_pack), `name`.\nConditional: if `type=coin_pack`, `coin_amount` (positive int) is required. If `type=subscription`, `entitlement_id` is required.\nOptional: `is_active` (default true).\n\nThe test script auto-sets `billingProductId`.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"rc_product_id\": \"com.example.coins_100\",\n  \"type\": \"coin_pack\",\n  \"name\": \"100 Coins Pack\",\n  \"coin_amount\": 100,\n  \"is_active\": true\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/products",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "products"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Update Billing Product",
-							"request": {
-								"method": "PATCH",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "PATCH `/api/admin/billing/products/:id`. Partial update of a billing product.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"name\": \"100 Coins Pack (Updated)\",\n  \"is_active\": true\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/products/{{billingProductId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "products", "{{billingProductId}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Get User Billing Detail",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/billing/users/:id`. Returns full billing detail for a user: customer mapping, entitlement, coin balance, and recent coin ledger.\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/users/{{userId}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "users", "{{userId}}"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Grant Coins",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "POST `/api/admin/billing/users/:id/coin-grant`. Manually grants coins to a user.\n\nRequired: `amount` (positive int), `description` (1-500 chars).\n\nResponse includes new balance.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"amount\": 50,\n  \"description\": \"Manual grant from Postman testing\"\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/users/{{userId}}/coin-grant",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "users", "{{userId}}", "coin-grant"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Debit Coins",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									},
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "POST `/api/admin/billing/users/:id/coin-debit`. Manually debits coins from a user.\n\nRequired: `amount` (positive int), `description` (1-500 chars).\n\nResponse includes new balance.\n\n**Admin auth required.**",
-								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"amount\": 10,\n  \"description\": \"Manual debit from Postman testing\"\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/users/{{userId}}/coin-debit",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "users", "{{userId}}", "coin-debit"]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "List Billing Events",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "X-Admin-Key",
-										"value": "{{adminApiKey}}",
-										"description": "Admin API key."
-									}
-								],
-								"description": "GET `/api/admin/billing/events`. Lists recent billing events (webhook deliveries, purchase completions, etc.).\n\n**Admin auth required.**",
-								"url": {
-									"raw": "{{baseUrl}}/api/admin/billing/events?page={{page}}&pageSize={{pageSize}}",
-									"host": ["{{baseUrl}}"],
-									"path": ["api", "admin", "billing", "events"],
-									"query": [
-										{ "key": "page", "value": "{{page}}" },
-										{ "key": "pageSize", "value": "{{pageSize}}" }
-									]
-								}
-							},
-							"response": []
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Internal",
-			"description": "**Internal service-to-service routes.** These are NOT mobile-safe and NOT public.\n\nIntended to be secured at the network level (e.g., Cloudflare Access). Useful for manual testing and debugging generation sync flows.",
-			"item": [
-				{
-					"name": "Sync Generation by ID",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"var json = pm.response.json();",
-									"if (json.success && json.data && json.data.outputAssetId) {",
-									"  pm.environment.set(\"outputAssetId\", json.data.outputAssetId);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [],
-						"description": "POST `/api/internal/generations/:id/sync`. **Internal-only.**\n\nManual sync for a single provider job. On completion, downloads the provider output, stores it in R2, creates an output asset, and returns `outputAssetId`.",
-						"url": {
-							"raw": "{{baseUrl}}/api/internal/generations/{{generationId}}/sync",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "internal", "generations", "{{generationId}}", "sync"]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Sync Pending Generations",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"description": "POST `/api/internal/generations/sync-pending`. **Internal-only.**\n\nBatch sync for up to 10 queued/processing jobs with provider info. The scheduled cron calls the same core sync behavior every 2 minutes.",
-						"url": {
-							"raw": "{{baseUrl}}/api/internal/generations/sync-pending",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "internal", "generations", "sync-pending"]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Webhooks",
-			"description": "Inbound webhook endpoints. These receive server-to-server callbacks from external services.\n\nThe RevenueCat webhook uses `Authorization: Bearer {secret}` for authentication — set `revenuecatWebhookSecret` to the same value configured as `REVENUECAT_WEBHOOK_SECRET` in your Worker secrets.",
-			"item": [
-				{
-					"name": "RevenueCat Webhook",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{revenuecatWebhookSecret}}",
-								"description": "Must match the REVENUECAT_WEBHOOK_SECRET Worker secret."
-							}
-						],
-						"description": "POST `/api/webhooks/revenuecat`. Receives RevenueCat server-to-server webhook events.\n\n**Auth:** `Authorization: Bearer {REVENUECAT_WEBHOOK_SECRET}` — uses timing-safe comparison.\n\nThe payload must contain `event.id` and `event.type`. Duplicate events are safely skipped (idempotent).\n\nCommon event types: `INITIAL_PURCHASE`, `RENEWAL`, `CANCELLATION`, `EXPIRATION`, `NON_RENEWING_PURCHASE`.\n\nThis example simulates a coin pack purchase event.",
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"api_version\": \"1.0\",\n  \"event\": {\n    \"id\": \"evt_postman_test_001\",\n    \"type\": \"NON_RENEWING_PURCHASE\",\n    \"app_user_id\": \"{{rcAppUserId}}\",\n    \"product_id\": \"com.example.coins_100\",\n    \"entitlement_ids\": [],\n    \"period_type\": \"NORMAL\",\n    \"purchased_at_ms\": 1713100000000,\n    \"store\": \"APP_STORE\",\n    \"environment\": \"SANDBOX\",\n    \"transaction_id\": \"txn_postman_test_001\",\n    \"original_transaction_id\": \"txn_postman_test_001\",\n    \"is_family_share\": false,\n    \"country_code\": \"US\",\n    \"currency\": \"USD\",\n    \"price_in_purchased_currency\": 4.99\n  }\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/webhooks/revenuecat",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "webhooks", "revenuecat"]
-						}
-					},
-					"response": []
-				}
-			]
-		}
-	],
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"exec": [""]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"exec": [""]
-			}
-		}
-	],
-	"variable": []
+  "info": {
+    "_postman_id": "8b88aa25-0c9a-4d5a-b4ce-1cf9c0ac6f9e",
+    "name": "AI Media Generate App API",
+    "description": "Complete API collection for the AI Media Generate backend.\n\n**Auth models:**\n- Mobile: `Authorization: Bearer {session_token}` from bootstrap\n- Admin: `X-Admin-Key: {ADMIN_API_KEY}` header\n- Internal: `X-Internal-Key: {INTERNAL_API_KEY}` header\n- Webhook: `Authorization: Bearer {REVENUECAT_WEBHOOK_SECRET}`\n\nRun **Mobile > Auth > Bootstrap** first to auto-set the authToken.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "description": "Public health and version endpoints. No authentication required.",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok', () => pm.expect(pm.response.json().data.status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            }
+          }
+        },
+        {
+          "name": "Version",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/version",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "version"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mobile",
+      "description": "Mobile client endpoints. Most require Bearer token auth (obtained from Bootstrap).",
+      "auth": {
+        "type": "bearer",
+        "bearer": [{ "key": "token", "value": "{{authToken}}", "type": "string" }]
+      },
+      "item": [
+        {
+          "name": "Auth",
+          "description": "Anonymous auth bootstrap, session info, and logout.",
+          "item": [
+            {
+              "name": "Bootstrap",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "var d = pm.response.json().data;",
+                      "if (d && d.access_token) {",
+                      "  pm.environment.set('authToken', d.access_token);",
+                      "  pm.environment.set('userId', d.user.id);",
+                      "  pm.test('authToken captured', () => pm.expect(d.access_token).to.be.a('string'));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"installation_id\": \"{{installationId}}\",\n  \"platform\": \"ios\",\n  \"app_version\": \"1.0.0\",\n  \"device_identifier\": \"{{deviceIdentifier}}\",\n  \"device_model\": \"iPhone 15 Pro\",\n  \"os_version\": \"18.0\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/auth/bootstrap",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "auth", "bootstrap"]
+                }
+              }
+            },
+            {
+              "name": "Get Me",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/auth/me",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "auth", "me"]
+                }
+              }
+            },
+            {
+              "name": "Logout",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/auth/logout",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "auth", "logout"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Home",
+          "description": "Mobile home screen data — featured filters and category sections.",
+          "item": [
+            {
+              "name": "Get Home",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/home",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "home"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Categories",
+          "description": "Browse categories and category-scoped filter listings.",
+          "item": [
+            {
+              "name": "List Categories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/categories",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "categories"]
+                }
+              }
+            },
+            {
+              "name": "Category Filters",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/categories/:slug/filters?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "categories", ":slug", "filters"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ],
+                  "variable": [
+                    { "key": "slug", "value": "{{categorySlug}}" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filters",
+          "description": "Browse active filters. Responses are client-safe (no provider internals).",
+          "item": [
+            {
+              "name": "List Filters",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.length > 0) {",
+                      "  pm.environment.set('filterId', d[0].id);",
+                      "  pm.environment.set('filterSlug', d[0].slug);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/filters?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "filters"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Filter Detail",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/filters/:slug",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "filters", ":slug"],
+                  "variable": [
+                    { "key": "slug", "value": "{{filterSlug}}" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Uploads",
+          "description": "Direct-to-R2 upload flow: request signed URL → PUT file → confirm.",
+          "item": [
+            {
+              "name": "Request Upload URL",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 201', () => pm.response.to.have.status(201));",
+                      "var d = pm.response.json().data;",
+                      "if (d) {",
+                      "  pm.environment.set('assetId', d.assetId);",
+                      "  pm.environment.set('uploadUrl', d.uploadUrl);",
+                      "  pm.environment.set('storageKey', d.storageKey);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filename\": \"test-photo.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 245760\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/uploads/request",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "uploads", "request"]
+                }
+              }
+            },
+            {
+              "name": "Upload File to R2 (manual)",
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "image/png" }],
+                "body": { "mode": "file", "file": { "src": "" } },
+                "description": "PUT the file binary to the signed R2 URL from the previous step.\n\nGo to Body > Binary and select a local file. The URL is the presigned uploadUrl captured in {{uploadUrl}}.\n\nThis request goes directly to R2, not to the Worker.",
+                "url": {
+                  "raw": "{{uploadUrl}}",
+                  "host": ["{{uploadUrl}}"]
+                }
+              }
+            },
+            {
+              "name": "Confirm Upload",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"assetId\": \"{{assetId}}\",\n  \"width\": 1024,\n  \"height\": 1024\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/uploads/confirm",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "uploads", "confirm"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assets",
+          "description": "List and view owned assets with signed read URLs.",
+          "item": [
+            {
+              "name": "List Assets",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/assets?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "assets"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" },
+                    { "key": "kind", "value": "input", "disabled": true },
+                    { "key": "media_type", "value": "image", "disabled": true },
+                    { "key": "status", "value": "uploaded", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Asset",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/assets/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "assets", ":id"],
+                  "variable": [
+                    { "key": "id", "value": "{{assetId}}" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generations",
+          "description": "Submit generation jobs and track their status.",
+          "item": [
+            {
+              "name": "Create Generation",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) {",
+                      "  pm.environment.set('generationId', d.id);",
+                      "  pm.environment.set('jobId', d.id);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filter_id\": \"{{filterId}}\",\n  \"input_asset_id\": \"{{assetId}}\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/generations",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "generations"]
+                }
+              }
+            },
+            {
+              "name": "List Generations",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/generations?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "generations"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" },
+                    { "key": "status", "value": "completed", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Generation Detail",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/generations/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "generations", ":id"],
+                  "variable": [
+                    { "key": "id", "value": "{{generationId}}" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Billing",
+          "description": "Coin balance, subscriptions, products, and RevenueCat customer mapping.",
+          "item": [
+            {
+              "name": "Get Billing State",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/billing/me",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "billing", "me"]
+                }
+              }
+            },
+            {
+              "name": "Get Coin Balance",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/billing/coins",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "billing", "coins"]
+                }
+              }
+            },
+            {
+              "name": "Get Entitlements",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/billing/entitlements",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "billing", "entitlements"]
+                }
+              }
+            },
+            {
+              "name": "List Products",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/billing/products",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "billing", "products"]
+                }
+              }
+            },
+            {
+              "name": "Register Customer",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rc_app_user_id\": \"{{rcAppUserId}}\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/billing/customer",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "billing", "customer"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Devices",
+          "description": "Push notification token management (not yet implemented, returns 501).",
+          "item": [
+            {
+              "name": "Register Push Token",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/devices/push-token",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "devices", "push-token"]
+                }
+              }
+            },
+            {
+              "name": "Remove Push Token",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/devices/push-token",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "devices", "push-token"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Admin-only endpoints. Requires X-Admin-Key header.",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          { "key": "key", "value": "X-Admin-Key", "type": "string" },
+          { "key": "value", "value": "{{adminApiKey}}", "type": "string" },
+          { "key": "in", "value": "header", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "Dashboard",
+          "item": [
+            {
+              "name": "Get Dashboard Stats",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/dashboard",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "dashboard"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Users",
+          "item": [
+            {
+              "name": "List Users",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/users?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "users"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get User",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/users/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "users", ":id"],
+                  "variable": [{ "key": "id", "value": "{{userId}}" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Jobs",
+          "item": [
+            {
+              "name": "List Jobs",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/jobs?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "jobs"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Job",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/jobs/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "jobs", ":id"],
+                  "variable": [{ "key": "id", "value": "{{jobId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Cancel Job",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/jobs/:id/cancel",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "jobs", ":id", "cancel"],
+                  "variable": [{ "key": "id", "value": "{{jobId}}" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assets",
+          "item": [
+            {
+              "name": "List Assets",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/assets?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "assets"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Asset",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/assets/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "assets", ":id"],
+                  "variable": [{ "key": "id", "value": "{{assetId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Delete Asset",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/assets/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "assets", ":id"],
+                  "variable": [{ "key": "id", "value": "{{assetId}}" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tags",
+          "item": [
+            {
+              "name": "List Tags",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/tags?page=1&pageSize=50",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "tags"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "50" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Tag",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/tags/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "tags", ":id"],
+                  "variable": [{ "key": "id", "value": "{{tagId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Create Tag",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) pm.environment.set('tagId', d.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slug\": \"limited-edition\",\n  \"name\": \"Limited Edition\",\n  \"is_active\": true,\n  \"sort_order\": 15\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/tags",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "tags"]
+                }
+              }
+            },
+            {
+              "name": "Update Tag",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Limited\",\n  \"is_active\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/tags/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "tags", ":id"],
+                  "variable": [{ "key": "id", "value": "{{tagId}}" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Categories",
+          "description": "Category CRUD and filter assignment management.",
+          "item": [
+            {
+              "name": "List Categories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories?page=1&pageSize=50",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "50" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Category",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories", ":id"],
+                  "variable": [{ "key": "id", "value": "{{categoryId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Create Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) {",
+                      "  pm.environment.set('categoryId', d.id);",
+                      "  pm.environment.set('categorySlug', d.slug);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slug\": \"new-arrivals\",\n  \"name\": \"New Arrivals\",\n  \"description\": \"Recently added filters\",\n  \"is_active\": true,\n  \"sort_order\": 5,\n  \"show_on_home\": true,\n  \"home_sort_order\": 5\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories"]
+                }
+              }
+            },
+            {
+              "name": "Update Category",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Fresh Arrivals\",\n  \"show_on_home\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories", ":id"],
+                  "variable": [{ "key": "id", "value": "{{categoryId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Delete Category",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories", ":id"],
+                  "variable": [{ "key": "id", "value": "{{categoryId}}" }]
+                }
+              }
+            },
+            {
+              "name": "List Category Filters",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories/:id/filters",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories", ":id", "filters"],
+                  "variable": [{ "key": "id", "value": "{{categoryId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Set Category Filters (bulk)",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filters\": [\n    { \"filter_id\": \"{{filterId}}\", \"sort_order\": 10 }\n  ]\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/categories/:id/filters",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "categories", ":id", "filters"],
+                  "variable": [{ "key": "id", "value": "{{categoryId}}" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filters",
+          "description": "Filter CRUD, preview management, and category assignments.",
+          "item": [
+            {
+              "name": "List Filters",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.length > 0) pm.environment.set('filterId', d[0].id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Filter",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Create Filter",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) {",
+                      "  pm.environment.set('filterId', d.id);",
+                      "  pm.environment.set('filterSlug', d.slug);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Neon Glow Portrait\",\n  \"slug\": \"neon-glow-portrait\",\n  \"description\": \"Cyberpunk-inspired neon glow effect on portraits\",\n  \"category\": \"portrait\",\n  \"provider_name\": \"atlas\",\n  \"model_key\": \"alibaba/wan-2.7/image-edit\",\n  \"operation_type\": \"image_to_image\",\n  \"prompt_template\": \"Transform the input photo into a neon-lit cyberpunk portrait with vivid glow effects, deep shadows, and saturated magenta and cyan highlights. Preserve the subject identity.\",\n  \"default_params_json\": { \"size\": \"1024x1024\", \"n\": 1 },\n  \"input_media_types\": \"image\",\n  \"coin_cost\": 8,\n  \"tag_id\": null,\n  \"preview_image_url\": \"https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=640&q=80\",\n  \"is_featured\": true,\n  \"featured_sort_order\": 5,\n  \"is_active\": true,\n  \"sort_order\": 15\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters"]
+                }
+              }
+            },
+            {
+              "name": "Update Filter",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"coin_cost\": 10,\n  \"is_featured\": true,\n  \"featured_sort_order\": 1,\n  \"tag_id\": \"{{tagId}}\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Delete Filter",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "List Filter Previews",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/previews",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "previews"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Add Filter Preview",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) pm.environment.set('previewId', d.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"preview_url\": \"https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=640&q=80\",\n  \"media_type\": \"image\",\n  \"sort_order\": 0,\n  \"is_primary\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/previews",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "previews"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Update Filter Preview",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"sort_order\": 1,\n  \"is_primary\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/previews/:previewId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "previews", ":previewId"],
+                  "variable": [
+                    { "key": "id", "value": "{{filterId}}" },
+                    { "key": "previewId", "value": "{{previewId}}" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Delete Filter Preview",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/previews/:previewId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "previews", ":previewId"],
+                  "variable": [
+                    { "key": "id", "value": "{{filterId}}" },
+                    { "key": "previewId", "value": "{{previewId}}" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "List Filter Categories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/categories",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "categories"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Add Filter to Category",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"category_id\": \"{{categoryId}}\",\n  \"sort_order\": 10\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/categories",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "categories"],
+                  "variable": [{ "key": "id", "value": "{{filterId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Remove Filter from Category",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/filters/:id/categories/:categoryId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "filters", ":id", "categories", ":categoryId"],
+                  "variable": [
+                    { "key": "id", "value": "{{filterId}}" },
+                    { "key": "categoryId", "value": "{{categoryId}}" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Billing",
+          "description": "Billing product management, coin grants/debits, and event log.",
+          "item": [
+            {
+              "name": "List Billing Products",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/products?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "products"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create Billing Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) pm.environment.set('billingProductId', d.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rc_product_id\": \"com.aiapp.coins_100\",\n  \"type\": \"coin_pack\",\n  \"name\": \"100 Coins\",\n  \"coin_amount\": 100,\n  \"is_active\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/products",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "products"]
+                }
+              }
+            },
+            {
+              "name": "Update Billing Product",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"100 Coins (Promo)\",\n  \"coin_amount\": 120\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/products/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "products", ":id"],
+                  "variable": [{ "key": "id", "value": "{{billingProductId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Get User Billing Detail",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/users/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "users", ":id"],
+                  "variable": [{ "key": "id", "value": "{{userId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Grant Coins",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 50,\n  \"description\": \"Welcome bonus via Postman\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/users/:id/coin-grant",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "users", ":id", "coin-grant"],
+                  "variable": [{ "key": "id", "value": "{{userId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Debit Coins",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 10,\n  \"description\": \"Manual adjustment via Postman\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/users/:id/coin-debit",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "users", ":id", "coin-debit"],
+                  "variable": [{ "key": "id", "value": "{{userId}}" }]
+                }
+              }
+            },
+            {
+              "name": "List Billing Events",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/billing/events?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "billing", "events"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Settings",
+          "item": [
+            {
+              "name": "List Settings",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/settings",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "settings"]
+                }
+              }
+            },
+            {
+              "name": "Get Setting",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/settings/:key",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "settings", ":key"],
+                  "variable": [{ "key": "key", "value": "{{settingKey}}" }]
+                }
+              }
+            },
+            {
+              "name": "Set Setting",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"value\": \"false\",\n  \"description\": \"Enable or disable maintenance mode\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/settings/:key",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "settings", ":key"],
+                  "variable": [{ "key": "key", "value": "{{settingKey}}" }]
+                }
+              }
+            },
+            {
+              "name": "Delete Setting",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/settings/:key",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "settings", ":key"],
+                  "variable": [{ "key": "key", "value": "{{settingKey}}" }]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Internal",
+      "description": "Service-to-service routes. Requires X-Internal-Key header. Not for mobile clients.",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          { "key": "key", "value": "X-Internal-Key", "type": "string" },
+          { "key": "value", "value": "{{internalApiKey}}", "type": "string" },
+          { "key": "in", "value": "header", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "Sync Pending Jobs",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal/generations/sync-pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "internal", "generations", "sync-pending"]
+            }
+          }
+        },
+        {
+          "name": "Sync Single Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal/generations/:id/sync",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "internal", "generations", ":id", "sync"],
+              "variable": [{ "key": "id", "value": "{{generationId}}" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "description": "External service callbacks. Not client-facing.",
+      "item": [
+        {
+          "name": "RevenueCat Webhook",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{revenuecatWebhookSecret}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"api_version\": \"1.0\",\n  \"event\": {\n    \"id\": \"rc-event-postman-001\",\n    \"type\": \"NON_RENEWING_PURCHASE\",\n    \"app_user_id\": \"{{rcAppUserId}}\",\n    \"product_id\": \"com.aiapp.coins_100\",\n    \"entitlement_ids\": null,\n    \"expiration_at_ms\": null,\n    \"purchased_at_ms\": 1713225600000,\n    \"store\": \"APP_STORE\",\n    \"environment\": \"SANDBOX\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks/revenuecat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "webhooks", "revenuecat"]
+            }
+          }
+        }
+      ]
+    }
+  ]
 }
