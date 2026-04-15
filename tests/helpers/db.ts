@@ -20,6 +20,7 @@ const RESET_TABLES = [
 	"generation_jobs",
 	"assets",
 	"filters",
+	"tags",
 	"admin_settings",
 	"users",
 	"tasks",

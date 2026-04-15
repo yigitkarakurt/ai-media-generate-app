@@ -173,7 +173,15 @@ generations.post("/", async (c) => {
 	}
 
 	/* ── Dispatch to provider ── */
-	const filterConfig = filter.config ? (JSON.parse(filter.config) as Record<string, unknown>) : null;
+	const filterConfig = filter.config ? (JSON.parse(filter.config) as Record<string, unknown>) : {};
+	const modelKey = filter.model_key || filter.provider_model_id;
+	const operationType = filter.operation_type
+		|| (typeof filterConfig.operation_type === "string" ? filterConfig.operation_type : undefined);
+	const dispatchConfig = {
+		...filterConfig,
+		model_key: modelKey,
+		...(operationType ? { operation_type: operationType } : {}),
+	};
 	const defaultParams = filter.default_params_json
 		? (JSON.parse(filter.default_params_json) as Record<string, unknown>)
 		: null;
@@ -185,8 +193,8 @@ generations.post("/", async (c) => {
 		dispatchResult = await dispatchGeneration(
 			{
 				jobId,
-				filterModelId: filter.provider_model_id,
-				filterConfig,
+				filterModelId: modelKey,
+				filterConfig: dispatchConfig,
 				inputStorageKey: asset.storage_key,
 				inputMediaType: asset.type,
 				params: data.params,

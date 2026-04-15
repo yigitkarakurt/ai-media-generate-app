@@ -48,6 +48,21 @@ export interface FilterRow {
 	default_params_json: string | null; // JSON string
 	is_active: number; // SQLite boolean (0 or 1)
 	coin_cost: number; // 0 means free
+	tag_id: string | null;
+	preview_image_url: string;
+	model_key: string;
+	operation_type: "text_to_image" | "image_to_image" | string;
+	is_featured: number; // SQLite boolean (0 or 1)
+	sort_order: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface TagRow {
+	id: string;
+	slug: string;
+	name: string;
+	is_active: number; // SQLite boolean (0 or 1)
 	sort_order: number;
 	created_at: string;
 	updated_at: string;

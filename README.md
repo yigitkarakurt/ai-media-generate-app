@@ -71,6 +71,7 @@ src/
     │   ├── jobs.ts                  # GET /api/admin/jobs, POST cancel
     │   ├── assets.ts                # GET,DELETE /api/admin/assets
     │   ├── filters.ts               # Full CRUD /api/admin/filters
+    │   ├── tags.ts                  # Tag CRUD /api/admin/tags
     │   └── settings.ts             # GET,PUT,DELETE /api/admin/settings
     └── internal/
         └── generations.ts           # POST sync-pending, POST :id/sync
@@ -241,6 +242,65 @@ register in `providers/index.ts`.
 Adding a new OpenRouter model: create `providers/openrouter/adapters/<model>.ts`, implement
 `ModelAdapter`, add to `adapterRegistry` in `providers/openrouter/index.ts`.
 
+## Filter Catalog
+
+Filters are the backend-controlled product catalog for mobile generation. The mobile client starts generation with a `filter_id`; it never supplies prompts, provider names, model keys, or operation types.
+
+Mobile filter responses are client-safe catalog records:
+
+```json
+{
+  "id": "filter-id",
+  "slug": "cinematic-portrait",
+  "name": "Cinematic Portrait",
+  "description": "Studio-grade portrait lighting with a cinematic finish.",
+  "coin_cost": 8,
+  "preview_image_url": "https://...",
+  "tag": { "id": "tag-id", "slug": "portrait", "name": "Portrait" },
+  "is_active": true
+}
+```
+
+Backend-only fields remain admin/internal only:
+
+| Field | Purpose |
+|-------|---------|
+| `provider_name` | Provider adapter route, for example `atlas` or `openrouter` |
+| `model_key` | Provider model identifier, for example `bytedance-seed/seedream-4.5` |
+| `operation_type` | `text_to_image` or `image_to_image` |
+| `prompt_template` | Backend-owned generation prompt |
+| `default_params_json` | Provider-specific defaults |
+
+`preview_image_url` is the current preview strategy. It is a single static image URL shown before the user chooses a filter. Rich before/after previews, video previews, and generated previews are deferred.
+
+Each filter has a required `coin_cost` integer. A value of `0` is free. Generation billing debits the filter's cost before dispatch and refunds it if dispatch fails.
+
+### Tags
+
+Tags live in a dedicated `tags` table and are managed through `/api/admin/tags`. A filter may reference at most one tag through `filters.tag_id`. There is intentionally no join table and no multi-tag support.
+
+Admins create tags separately, then choose an existing `tag_id` when creating or updating a filter. Filter writes reject unknown `tag_id` values with `INVALID_TAG_ID`. Mobile clients receive only tag display data.
+
+Seeded tags:
+
+| Slug | Name |
+|------|------|
+| `portrait` | Portrait |
+| `cinematic` | Cinematic |
+| `artistic` | Artistic |
+| `product` | Product |
+
+Seeded filters:
+
+| Slug | Provider | Model Key | Operation | Cost |
+|------|----------|-----------|-----------|------|
+| `cinematic-portrait` | `atlas` | `alibaba/wan-2.7/image-edit` | `image_to_image` | 8 |
+| `product-hero-shot` | `atlas` | `alibaba/wan-2.7/image-edit` | `image_to_image` | 10 |
+| `dream-scene` | `openrouter` | `bytedance-seed/seedream-4.5` | `text_to_image` | 6 |
+| `editorial-remix` | `openrouter` | `bytedance-seed/seedream-4.5` | `image_to_image` | 7 |
+
+Deferred catalog work: many-to-many tags, multi-tag filters, before/after previews, preview videos, dynamic preview generation, client-provided prompts, and client-side provider selection.
+
 ## OpenRouter Provider — Seedream 4.5
 
 ### Overview
@@ -263,8 +323,8 @@ statuses and output asset IDs, exactly as with Atlas.
 | `text_to_image` | Sends text prompt only. `modalities: ["image"]`. |
 | `image_to_image` | Sends text prompt + signed R2 read URL for the input image. The provider fetches the input directly from R2. |
 
-The operation is controlled by the filter's `config` JSON column (`operation_type` key).
-The mobile client never sets this.
+The operation is controlled by the filter's `operation_type` column. Legacy `config.operation_type`
+is still mirrored for compatibility. The mobile client never sets either value.
 
 ### Filter configuration
 
@@ -273,10 +333,11 @@ To target OpenRouter with Seedream 4.5, set the following on a filter (via admin
 | Field | Value |
 |-------|-------|
 | `provider_name` | `openrouter` |
-| `provider_model_id` | `bytedance-seed/seedream-4.5` |
-| `config` | `{"operation_type":"text_to_image"}` or `{"operation_type":"image_to_image"}` |
+| `model_key` | `bytedance-seed/seedream-4.5` |
+| `operation_type` | `text_to_image` or `image_to_image` |
 | `prompt_template` | Backend-controlled prompt text |
 | `input_media_types` | `image` (video not supported for this adapter) |
+| `coin_cost` | Integer generation cost |
 
 Example admin API call:
 ```bash
@@ -288,11 +349,12 @@ curl -X POST http://localhost:8787/api/admin/filters \
     "slug": "dreamlike-style",
     "description": "AI-powered dreamlike artistic transformation",
     "provider_name": "openrouter",
-    "provider_model_id": "bytedance-seed/seedream-4.5",
-    "config": "{\"operation_type\":\"image_to_image\"}",
+    "model_key": "bytedance-seed/seedream-4.5",
+    "operation_type": "image_to_image",
     "prompt_template": "Transform this photo into a dreamlike artistic painting",
     "input_media_types": "image",
-    "coin_cost": 5
+    "coin_cost": 5,
+    "preview_image_url": "https://example.com/preview.jpg"
   }'
 ```
 
@@ -682,6 +744,7 @@ wrangler secret put INTERNAL_API_KEY
 | Admin Jobs | `/api/admin/jobs` | Admin | Job monitoring and cancellation |
 | Admin Assets | `/api/admin/assets` | Admin | Asset management |
 | Admin Filters | `/api/admin/filters` | Admin | Filter CRUD |
+| Admin Tags | `/api/admin/tags` | Admin | Filter tag CRUD |
 | Admin Billing | `/api/admin/billing` | Admin | Product CRUD, coin ops, events |
 | Admin Settings | `/api/admin/settings` | Admin | Key-value config store |
 | Internal Generations | `/api/internal/generations` | Internal | Job sync (single + batch) |
@@ -702,6 +765,7 @@ wrangler secret put INTERNAL_API_KEY
 | `auth_identities` | Future: linked Apple/Google/email identities |
 | `assets` | Uploaded/generated media files with `kind` (input/output), linked to R2 |
 | `filters` | AI generation filter catalog |
+| `tags` | Backend-managed reusable single tags for filters |
 | `generation_jobs` | Generation job queue with status tracking |
 | `device_push_tokens` | Push notification tokens per device |
 | `admin_settings` | Key-value configuration store |

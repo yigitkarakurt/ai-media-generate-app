@@ -17,6 +17,7 @@ import { adminUserRoutes } from "./modules/admin/users";
 import { adminJobRoutes } from "./modules/admin/jobs";
 import { adminAssetRoutes } from "./modules/admin/assets";
 import { adminFilterRoutes } from "./modules/admin/filters";
+import { adminTagRoutes } from "./modules/admin/tags";
 import { adminSettingRoutes } from "./modules/admin/settings";
 import { internalGenerationRoutes } from "./modules/internal/generations";
 import { mobileBillingRoutes } from "./modules/mobile/billing";
@@ -73,6 +74,7 @@ app.route("/api/admin/users", adminUserRoutes);
 app.route("/api/admin/jobs", adminJobRoutes);
 app.route("/api/admin/assets", adminAssetRoutes);
 app.route("/api/admin/filters", adminFilterRoutes);
+app.route("/api/admin/tags", adminTagRoutes);
 app.route("/api/admin/settings", adminSettingRoutes);
 app.route("/api/admin/billing", adminBillingRoutes);
 

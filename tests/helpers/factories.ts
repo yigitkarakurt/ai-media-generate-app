@@ -4,6 +4,7 @@ import type {
 	AssetRow,
 	BillingProductRow,
 	FilterRow,
+	TagRow,
 	UserRow,
 } from "../../src/core/db/schema";
 import { createSession } from "../../src/core/auth/sessions";
@@ -270,6 +271,11 @@ export async function insertFilter(
 		default_params_json: overrides.default_params_json ?? null,
 		is_active: overrides.is_active ?? 1,
 		coin_cost: overrides.coin_cost ?? 0,
+		tag_id: overrides.tag_id ?? null,
+		preview_image_url: overrides.preview_image_url ?? "https://example.test/preview.png",
+		model_key: overrides.model_key ?? overrides.provider_model_id ?? "atlas-test-model",
+		operation_type: overrides.operation_type ?? "image_to_image",
+		is_featured: overrides.is_featured ?? 0,
 		sort_order: overrides.sort_order ?? 0,
 		created_at: overrides.created_at ?? now,
 		updated_at: overrides.updated_at ?? now,
@@ -281,8 +287,9 @@ export async function insertFilter(
 				id, name, slug, description, thumbnail_url, category,
 				provider_model_id, config, input_media_types, provider_name,
 				prompt_template, default_params_json, is_active, coin_cost,
+				tag_id, preview_image_url, model_key, operation_type, is_featured,
 				sort_order, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			filter.id,
@@ -299,6 +306,11 @@ export async function insertFilter(
 			filter.default_params_json,
 			filter.is_active,
 			filter.coin_cost,
+			filter.tag_id,
+			filter.preview_image_url,
+			filter.model_key,
+			filter.operation_type,
+			filter.is_featured,
 			filter.sort_order,
 			filter.created_at,
 			filter.updated_at,
@@ -306,6 +318,42 @@ export async function insertFilter(
 		.run();
 
 	return filter;
+}
+
+export async function insertTag(
+	overrides: Partial<TagRow> = {},
+	db: D1Database = env.DB,
+) {
+	const tagId = overrides.id ?? crypto.randomUUID();
+	const now = nowIso();
+	const tag = {
+		id: tagId,
+		slug: overrides.slug ?? `tag-${tagId}`,
+		name: overrides.name ?? "Test Tag",
+		is_active: overrides.is_active ?? 1,
+		sort_order: overrides.sort_order ?? 0,
+		created_at: overrides.created_at ?? now,
+		updated_at: overrides.updated_at ?? now,
+	} satisfies TagRow;
+
+	await db
+		.prepare(
+			`INSERT INTO tags (
+				id, slug, name, is_active, sort_order, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			tag.id,
+			tag.slug,
+			tag.name,
+			tag.is_active,
+			tag.sort_order,
+			tag.created_at,
+			tag.updated_at,
+		)
+		.run();
+
+	return tag;
 }
 
 export function makeRevenueCatEvent(
