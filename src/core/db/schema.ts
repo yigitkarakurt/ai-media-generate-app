@@ -48,11 +48,12 @@ export interface FilterRow {
 	default_params_json: string | null; // JSON string
 	is_active: number; // SQLite boolean (0 or 1)
 	coin_cost: number; // 0 means free
-	tag_id: string | null;
+	tag_id: string | null; // primary tag (badge) for this filter
 	preview_image_url: string;
 	model_key: string;
 	operation_type: "text_to_image" | "image_to_image" | string;
 	is_featured: number; // SQLite boolean (0 or 1)
+	featured_sort_order: number;
 	sort_order: number;
 	created_at: string;
 	updated_at: string;
@@ -64,6 +65,38 @@ export interface TagRow {
 	name: string;
 	is_active: number; // SQLite boolean (0 or 1)
 	sort_order: number;
+	created_at: string;
+	updated_at: string;
+}
+
+/* ──────────────── Catalog Row Types ──────────────── */
+
+export interface CategoryRow {
+	id: string;
+	slug: string;
+	name: string;
+	description: string;
+	is_active: number; // SQLite boolean (0 or 1)
+	sort_order: number;
+	show_on_home: number; // SQLite boolean (0 or 1)
+	home_sort_order: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface FilterCategoryRow {
+	filter_id: string;
+	category_id: string;
+	sort_order: number;
+}
+
+export interface FilterPreviewRow {
+	id: string;
+	filter_id: string;
+	preview_url: string;
+	media_type: string;
+	sort_order: number;
+	is_primary: number; // SQLite boolean (0 or 1)
 	created_at: string;
 	updated_at: string;
 }

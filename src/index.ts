@@ -12,12 +12,15 @@ import { mobileUploadRoutes } from "./modules/mobile/uploads";
 import { mobileAssetRoutes } from "./modules/mobile/assets";
 import { mobileDeviceRoutes } from "./modules/mobile/devices";
 import { mobileAuthRoutes } from "./modules/mobile/auth";
+import { mobileHomeRoutes } from "./modules/mobile/home";
+import { mobileCategoryRoutes } from "./modules/mobile/categories";
 import { adminDashboardRoutes } from "./modules/admin/dashboard";
 import { adminUserRoutes } from "./modules/admin/users";
 import { adminJobRoutes } from "./modules/admin/jobs";
 import { adminAssetRoutes } from "./modules/admin/assets";
 import { adminFilterRoutes } from "./modules/admin/filters";
 import { adminTagRoutes } from "./modules/admin/tags";
+import { adminCategoryRoutes } from "./modules/admin/categories";
 import { adminSettingRoutes } from "./modules/admin/settings";
 import { internalGenerationRoutes } from "./modules/internal/generations";
 import { mobileBillingRoutes } from "./modules/mobile/billing";
@@ -60,7 +63,9 @@ app.route("/api", healthRoutes);
 
 // Mobile client routes
 app.route("/api/mobile/auth", mobileAuthRoutes);
+app.route("/api/mobile/home", mobileHomeRoutes);
 app.route("/api/mobile/filters", mobileFilterRoutes);
+app.route("/api/mobile/categories", mobileCategoryRoutes);
 app.route("/api/mobile/generations", mobileGenerationRoutes);
 app.route("/api/mobile/uploads", mobileUploadRoutes);
 app.route("/api/mobile/assets", mobileAssetRoutes);
@@ -75,6 +80,7 @@ app.route("/api/admin/jobs", adminJobRoutes);
 app.route("/api/admin/assets", adminAssetRoutes);
 app.route("/api/admin/filters", adminFilterRoutes);
 app.route("/api/admin/tags", adminTagRoutes);
+app.route("/api/admin/categories", adminCategoryRoutes);
 app.route("/api/admin/settings", adminSettingRoutes);
 app.route("/api/admin/billing", adminBillingRoutes);
 

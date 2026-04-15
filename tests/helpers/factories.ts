@@ -3,6 +3,9 @@ import type { RCWebhookPayload } from "../../src/core/billing/types";
 import type {
 	AssetRow,
 	BillingProductRow,
+	CategoryRow,
+	FilterCategoryRow,
+	FilterPreviewRow,
 	FilterRow,
 	TagRow,
 	UserRow,
@@ -276,6 +279,7 @@ export async function insertFilter(
 		model_key: overrides.model_key ?? overrides.provider_model_id ?? "atlas-test-model",
 		operation_type: overrides.operation_type ?? "image_to_image",
 		is_featured: overrides.is_featured ?? 0,
+		featured_sort_order: overrides.featured_sort_order ?? 0,
 		sort_order: overrides.sort_order ?? 0,
 		created_at: overrides.created_at ?? now,
 		updated_at: overrides.updated_at ?? now,
@@ -288,8 +292,8 @@ export async function insertFilter(
 				provider_model_id, config, input_media_types, provider_name,
 				prompt_template, default_params_json, is_active, coin_cost,
 				tag_id, preview_image_url, model_key, operation_type, is_featured,
-				sort_order, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				featured_sort_order, sort_order, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			filter.id,
@@ -311,6 +315,7 @@ export async function insertFilter(
 			filter.model_key,
 			filter.operation_type,
 			filter.is_featured,
+			filter.featured_sort_order,
 			filter.sort_order,
 			filter.created_at,
 			filter.updated_at,
@@ -354,6 +359,111 @@ export async function insertTag(
 		.run();
 
 	return tag;
+}
+
+export async function insertCategory(
+	overrides: Partial<CategoryRow> = {},
+	db: D1Database = env.DB,
+) {
+	const catId = overrides.id ?? crypto.randomUUID();
+	const now = nowIso();
+	const category = {
+		id: catId,
+		slug: overrides.slug ?? `cat-${catId}`,
+		name: overrides.name ?? "Test Category",
+		description: overrides.description ?? "",
+		is_active: overrides.is_active ?? 1,
+		sort_order: overrides.sort_order ?? 0,
+		show_on_home: overrides.show_on_home ?? 0,
+		home_sort_order: overrides.home_sort_order ?? 0,
+		created_at: overrides.created_at ?? now,
+		updated_at: overrides.updated_at ?? now,
+	} satisfies CategoryRow;
+
+	await db
+		.prepare(
+			`INSERT INTO categories (
+				id, slug, name, description, is_active, sort_order,
+				show_on_home, home_sort_order, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			category.id,
+			category.slug,
+			category.name,
+			category.description,
+			category.is_active,
+			category.sort_order,
+			category.show_on_home,
+			category.home_sort_order,
+			category.created_at,
+			category.updated_at,
+		)
+		.run();
+
+	return category;
+}
+
+export async function insertFilterCategory(
+	filterId: string,
+	categoryId: string,
+	sortOrder = 0,
+	db: D1Database = env.DB,
+) {
+	const row = {
+		filter_id: filterId,
+		category_id: categoryId,
+		sort_order: sortOrder,
+	} satisfies FilterCategoryRow;
+
+	await db
+		.prepare(
+			"INSERT INTO filter_categories (filter_id, category_id, sort_order) VALUES (?, ?, ?)",
+		)
+		.bind(row.filter_id, row.category_id, row.sort_order)
+		.run();
+
+	return row;
+}
+
+export async function insertFilterPreview(
+	filterId: string,
+	overrides: Partial<Omit<FilterPreviewRow, "filter_id">> = {},
+	db: D1Database = env.DB,
+) {
+	const previewId = overrides.id ?? crypto.randomUUID();
+	const now = nowIso();
+	const preview = {
+		id: previewId,
+		filter_id: filterId,
+		preview_url: overrides.preview_url ?? "https://example.test/preview.jpg",
+		media_type: overrides.media_type ?? "image",
+		sort_order: overrides.sort_order ?? 0,
+		is_primary: overrides.is_primary ?? 0,
+		created_at: overrides.created_at ?? now,
+		updated_at: overrides.updated_at ?? now,
+	} satisfies FilterPreviewRow;
+
+	await db
+		.prepare(
+			`INSERT INTO filter_previews (
+				id, filter_id, preview_url, media_type, sort_order, is_primary,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			preview.id,
+			preview.filter_id,
+			preview.preview_url,
+			preview.media_type,
+			preview.sort_order,
+			preview.is_primary,
+			preview.created_at,
+			preview.updated_at,
+		)
+		.run();
+
+	return preview;
 }
 
 export function makeRevenueCatEvent(

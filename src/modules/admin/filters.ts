@@ -3,8 +3,10 @@ import { z } from "zod";
 import type { AppEnv } from "../../bindings";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
-import type { FilterRow } from "../../core/db/schema";
+import type { FilterRow, FilterPreviewRow } from "../../core/db/schema";
 import { AppError } from "../../shared/errors";
+
+/* ──────────────── Shared helpers ──────────────── */
 
 const jsonObjectSchema = z.union([
 	z.record(z.unknown()),
@@ -29,6 +31,8 @@ const jsonObjectSchema = z.union([
 	}),
 ]);
 
+/* ──────────────── Filter schemas ──────────────── */
+
 const createFilterSchema = z.object({
 	name: z.string().min(1).max(100),
 	slug: z.string().min(1).max(100),
@@ -47,11 +51,34 @@ const createFilterSchema = z.object({
 	tag_id: z.string().uuid().nullable().optional(),
 	preview_image_url: z.string().url().or(z.literal("")).default(""),
 	is_featured: z.boolean().default(false),
+	featured_sort_order: z.number().int().min(0).default(0),
 	is_active: z.boolean().default(true),
 	sort_order: z.number().int().min(0).default(0),
 });
 
 const updateFilterSchema = createFilterSchema.partial();
+
+/* ──────────────── Preview schemas ──────────────── */
+
+const ALLOWED_PREVIEW_MEDIA_TYPES = ["image"] as const;
+
+const createPreviewSchema = z.object({
+	preview_url: z.string().url(),
+	media_type: z.enum(ALLOWED_PREVIEW_MEDIA_TYPES).default("image"),
+	sort_order: z.number().int().min(0).default(0),
+	is_primary: z.boolean().default(false),
+});
+
+const updatePreviewSchema = createPreviewSchema.partial();
+
+/* ──────────────── Category assignment schema ──────────────── */
+
+const addCategorySchema = z.object({
+	category_id: z.string().uuid(),
+	sort_order: z.number().int().min(0).default(0),
+});
+
+/* ──────────────── Query helpers ──────────────── */
 
 type AdminFilterRow = FilterRow & {
 	tag_slug: string | null;
@@ -100,6 +127,17 @@ async function assertTagExists(db: D1Database, tagId: string | null | undefined)
 	}
 }
 
+async function assertFilterExists(db: D1Database, filterId: string) {
+	const row = await db
+		.prepare("SELECT id FROM filters WHERE id = ?")
+		.bind(filterId)
+		.first<{ id: string }>();
+	if (!row) {
+		throw AppError.notFound("Filter");
+	}
+	return row;
+}
+
 function serializeJsonObject(value: Record<string, unknown> | undefined) {
 	return value === undefined ? undefined : JSON.stringify(value);
 }
@@ -123,7 +161,11 @@ function buildConfig(
 	};
 }
 
+/* ──────────────── Router ──────────────── */
+
 const filters = new Hono<AppEnv>();
+
+/* ═══════════════ Filter CRUD ═══════════════ */
 
 /** List all filters including inactive (admin) */
 filters.get("/", async (c) => {
@@ -184,8 +226,9 @@ filters.post("/", async (c) => {
 				id, name, slug, description, thumbnail_url, category,
 				provider_model_id, provider_name, prompt_template, default_params_json,
 				config, input_media_types, is_active, coin_cost, tag_id, preview_image_url,
-				model_key, operation_type, is_featured, sort_order, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				model_key, operation_type, is_featured, featured_sort_order, sort_order,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			id,
@@ -207,6 +250,7 @@ filters.post("/", async (c) => {
 			data.model_key,
 			data.operation_type,
 			data.is_featured ? 1 : 0,
+			data.featured_sort_order,
 			data.sort_order,
 			now,
 			now,
@@ -264,6 +308,7 @@ filters.patch("/:id", async (c) => {
 	if (data.tag_id !== undefined) { sets.push("tag_id = ?"); values.push(data.tag_id); }
 	if (data.preview_image_url !== undefined) { sets.push("preview_image_url = ?"); values.push(data.preview_image_url); }
 	if (data.is_featured !== undefined) { sets.push("is_featured = ?"); values.push(data.is_featured ? 1 : 0); }
+	if (data.featured_sort_order !== undefined) { sets.push("featured_sort_order = ?"); values.push(data.featured_sort_order); }
 	if (data.is_active !== undefined) { sets.push("is_active = ?"); values.push(data.is_active ? 1 : 0); }
 	if (data.sort_order !== undefined) { sets.push("sort_order = ?"); values.push(data.sort_order); }
 
@@ -298,7 +343,210 @@ filters.delete("/:id", async (c) => {
 		return c.json({ success: false, error: { code: "NOT_FOUND", message: "Filter not found" } }, 404);
 	}
 
+	// Clean up related data
+	await Promise.all([
+		db.prepare("DELETE FROM filter_categories WHERE filter_id = ?").bind(id).run(),
+		db.prepare("DELETE FROM filter_previews WHERE filter_id = ?").bind(id).run(),
+	]);
+
 	return success(c, { id, deleted: true });
+});
+
+/* ═══════════════ Filter Previews ═══════════════ */
+
+/** List previews for a filter */
+filters.get("/:id/previews", async (c) => {
+	const id = c.req.param("id");
+	const db = c.env.DB;
+
+	await assertFilterExists(db, id);
+
+	const rows = await db
+		.prepare("SELECT * FROM filter_previews WHERE filter_id = ? ORDER BY sort_order ASC")
+		.bind(id)
+		.all<FilterPreviewRow>();
+
+	return success(c, rows.results.map((r) => ({ ...r, is_primary: Boolean(r.is_primary) })));
+});
+
+/** Add a preview to a filter */
+filters.post("/:id/previews", async (c) => {
+	const filterId = c.req.param("id");
+	const data = createPreviewSchema.parse(await c.req.json());
+	const db = c.env.DB;
+
+	await assertFilterExists(db, filterId);
+
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+
+	// If marking as primary, clear any existing primary
+	if (data.is_primary) {
+		await db
+			.prepare("UPDATE filter_previews SET is_primary = 0, updated_at = ? WHERE filter_id = ? AND is_primary = 1")
+			.bind(now, filterId)
+			.run();
+	}
+
+	await db
+		.prepare(
+			`INSERT INTO filter_previews (
+				id, filter_id, preview_url, media_type, sort_order, is_primary,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(id, filterId, data.preview_url, data.media_type, data.sort_order, data.is_primary ? 1 : 0, now, now)
+		.run();
+
+	const created = await db
+		.prepare("SELECT * FROM filter_previews WHERE id = ?")
+		.bind(id)
+		.first<FilterPreviewRow>();
+
+	return success(c, created ? { ...created, is_primary: Boolean(created.is_primary) } : null, 201);
+});
+
+/** Update a preview */
+filters.patch("/:id/previews/:previewId", async (c) => {
+	const filterId = c.req.param("id");
+	const previewId = c.req.param("previewId");
+	const data = updatePreviewSchema.parse(await c.req.json());
+	const db = c.env.DB;
+
+	const existing = await db
+		.prepare("SELECT * FROM filter_previews WHERE id = ? AND filter_id = ?")
+		.bind(previewId, filterId)
+		.first<FilterPreviewRow>();
+
+	if (!existing) {
+		return c.json({ success: false, error: { code: "NOT_FOUND", message: "Preview not found" } }, 404);
+	}
+
+	const sets: string[] = [];
+	const values: unknown[] = [];
+	const now = new Date().toISOString();
+
+	// If marking as primary, clear any existing primary first
+	if (data.is_primary === true) {
+		await db
+			.prepare("UPDATE filter_previews SET is_primary = 0, updated_at = ? WHERE filter_id = ? AND is_primary = 1 AND id != ?")
+			.bind(now, filterId, previewId)
+			.run();
+	}
+
+	if (data.preview_url !== undefined) { sets.push("preview_url = ?"); values.push(data.preview_url); }
+	if (data.media_type !== undefined) { sets.push("media_type = ?"); values.push(data.media_type); }
+	if (data.sort_order !== undefined) { sets.push("sort_order = ?"); values.push(data.sort_order); }
+	if (data.is_primary !== undefined) { sets.push("is_primary = ?"); values.push(data.is_primary ? 1 : 0); }
+
+	if (sets.length === 0) {
+		return success(c, { ...existing, is_primary: Boolean(existing.is_primary) });
+	}
+
+	sets.push("updated_at = ?");
+	values.push(now);
+	values.push(previewId);
+
+	await db
+		.prepare(`UPDATE filter_previews SET ${sets.join(", ")} WHERE id = ?`)
+		.bind(...values)
+		.run();
+
+	const updated = await db
+		.prepare("SELECT * FROM filter_previews WHERE id = ?")
+		.bind(previewId)
+		.first<FilterPreviewRow>();
+
+	return success(c, updated ? { ...updated, is_primary: Boolean(updated.is_primary) } : null);
+});
+
+/** Delete a preview */
+filters.delete("/:id/previews/:previewId", async (c) => {
+	const filterId = c.req.param("id");
+	const previewId = c.req.param("previewId");
+	const db = c.env.DB;
+
+	const result = await db
+		.prepare("DELETE FROM filter_previews WHERE id = ? AND filter_id = ?")
+		.bind(previewId, filterId)
+		.run();
+
+	if (result.meta.changes === 0) {
+		return c.json({ success: false, error: { code: "NOT_FOUND", message: "Preview not found" } }, 404);
+	}
+
+	return success(c, { id: previewId, deleted: true });
+});
+
+/* ═══════════════ Filter ↔ Category assignments ═══════════════ */
+
+/** List categories for a filter */
+filters.get("/:id/categories", async (c) => {
+	const id = c.req.param("id");
+	const db = c.env.DB;
+
+	await assertFilterExists(db, id);
+
+	const rows = await db
+		.prepare(
+			`SELECT c.id, c.slug, c.name, c.is_active, fc.sort_order AS assignment_sort_order
+			FROM filter_categories fc
+			JOIN categories c ON c.id = fc.category_id
+			WHERE fc.filter_id = ?
+			ORDER BY fc.sort_order ASC`,
+		)
+		.bind(id)
+		.all();
+
+	return success(c, rows.results);
+});
+
+/** Add a filter to a category */
+filters.post("/:id/categories", async (c) => {
+	const filterId = c.req.param("id");
+	const data = addCategorySchema.parse(await c.req.json());
+	const db = c.env.DB;
+
+	await assertFilterExists(db, filterId);
+
+	// Validate category exists
+	const cat = await db
+		.prepare("SELECT id FROM categories WHERE id = ?")
+		.bind(data.category_id)
+		.first<{ id: string }>();
+	if (!cat) {
+		throw AppError.badRequest("INVALID_CATEGORY_ID", "category_id must reference an existing category");
+	}
+
+	// Upsert assignment
+	await db
+		.prepare(
+			`INSERT INTO filter_categories (filter_id, category_id, sort_order)
+			VALUES (?, ?, ?)
+			ON CONFLICT(filter_id, category_id) DO UPDATE SET sort_order = ?`,
+		)
+		.bind(filterId, data.category_id, data.sort_order, data.sort_order)
+		.run();
+
+	return success(c, { filter_id: filterId, category_id: data.category_id, sort_order: data.sort_order }, 201);
+});
+
+/** Remove a filter from a category */
+filters.delete("/:id/categories/:categoryId", async (c) => {
+	const filterId = c.req.param("id");
+	const categoryId = c.req.param("categoryId");
+	const db = c.env.DB;
+
+	const result = await db
+		.prepare("DELETE FROM filter_categories WHERE filter_id = ? AND category_id = ?")
+		.bind(filterId, categoryId)
+		.run();
+
+	if (result.meta.changes === 0) {
+		return c.json({ success: false, error: { code: "NOT_FOUND", message: "Assignment not found" } }, 404);
+	}
+
+	return success(c, { filter_id: filterId, category_id: categoryId, deleted: true });
 });
 
 export { filters as adminFilterRoutes };

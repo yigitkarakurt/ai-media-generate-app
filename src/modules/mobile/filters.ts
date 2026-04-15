@@ -3,13 +3,20 @@ import type { AuthedEnv } from "../../middleware/auth";
 import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
-import type { FilterRow } from "../../core/db/schema";
+import type { FilterRow, FilterPreviewRow, CategoryRow } from "../../core/db/schema";
+
+/* ──────────────── Query row types ──────────────── */
 
 type FilterCatalogRow = FilterRow & {
 	tag_slug: string | null;
 	tag_name: string | null;
 	tag_is_active: number | null;
+	pp_id: string | null;
+	pp_url: string | null;
+	pp_media_type: string | null;
 };
+
+/* ──────────────── Client-safe transforms ──────────────── */
 
 /** Strips provider-internal fields the mobile client should never see. */
 function toClientFilter(row: FilterCatalogRow) {
@@ -32,11 +39,51 @@ function toClientFilter(row: FilterCatalogRow) {
 				name: row.tag_name,
 			}
 			: null,
+		primary_preview: row.pp_id
+			? { id: row.pp_id, preview_url: row.pp_url, media_type: row.pp_media_type }
+			: row.preview_image_url
+				? { id: null, preview_url: row.preview_image_url, media_type: "image" }
+				: null,
 		sort_order: row.sort_order,
 		created_at: row.created_at,
 		updated_at: row.updated_at,
 	};
 }
+
+function toClientPreview(row: FilterPreviewRow) {
+	return {
+		id: row.id,
+		preview_url: row.preview_url,
+		media_type: row.media_type,
+		sort_order: row.sort_order,
+		is_primary: Boolean(row.is_primary),
+	};
+}
+
+function toClientCategoryRef(row: CategoryRow) {
+	return {
+		id: row.id,
+		slug: row.slug,
+		name: row.name,
+	};
+}
+
+/* ──────────────── SQL fragments ──────────────── */
+
+const CATALOG_SELECT = `
+	SELECT
+		f.*,
+		t.slug AS tag_slug,
+		t.name AS tag_name,
+		t.is_active AS tag_is_active,
+		fp.id AS pp_id,
+		fp.preview_url AS pp_url,
+		fp.media_type AS pp_media_type
+	FROM filters f
+	LEFT JOIN tags t ON t.id = f.tag_id
+	LEFT JOIN filter_previews fp ON fp.filter_id = f.id AND fp.is_primary = 1`;
+
+/* ──────────────── Router ──────────────── */
 
 const filters = new Hono<AuthedEnv>();
 
@@ -52,13 +99,7 @@ filters.get("/", async (c) => {
 	const [rows, countResult] = await Promise.all([
 		db
 			.prepare(
-				`SELECT
-					f.*,
-					t.slug AS tag_slug,
-					t.name AS tag_name,
-					t.is_active AS tag_is_active
-				FROM filters f
-				LEFT JOIN tags t ON t.id = f.tag_id
+				`${CATALOG_SELECT}
 				WHERE f.is_active = 1
 				ORDER BY f.sort_order ASC, f.created_at DESC
 				LIMIT ? OFFSET ?`,
@@ -80,22 +121,13 @@ filters.get("/", async (c) => {
 	});
 });
 
-/** Get a single filter by slug */
+/** Get a single filter by slug — includes full preview gallery and categories */
 filters.get("/:slug", async (c) => {
 	const slug = c.req.param("slug");
 	const db = c.env.DB;
 
 	const row = await db
-		.prepare(
-			`SELECT
-				f.*,
-				t.slug AS tag_slug,
-				t.name AS tag_name,
-				t.is_active AS tag_is_active
-			FROM filters f
-			LEFT JOIN tags t ON t.id = f.tag_id
-			WHERE f.slug = ? AND f.is_active = 1`,
-		)
+		.prepare(`${CATALOG_SELECT} WHERE f.slug = ? AND f.is_active = 1`)
 		.bind(slug)
 		.first<FilterCatalogRow>();
 
@@ -103,7 +135,31 @@ filters.get("/:slug", async (c) => {
 		return c.json({ success: false, error: { code: "NOT_FOUND", message: "Filter not found" } }, 404);
 	}
 
-	return success(c, toClientFilter(row));
+	// Fetch full preview gallery and categories in parallel
+	const [previews, categoryRows] = await Promise.all([
+		db
+			.prepare("SELECT * FROM filter_previews WHERE filter_id = ? ORDER BY sort_order ASC")
+			.bind(row.id)
+			.all<FilterPreviewRow>(),
+		db
+			.prepare(
+				`SELECT c.id, c.slug, c.name, c.description, c.sort_order,
+						c.is_active, c.show_on_home, c.home_sort_order,
+						c.created_at, c.updated_at
+				FROM filter_categories fc
+				JOIN categories c ON c.id = fc.category_id AND c.is_active = 1
+				WHERE fc.filter_id = ?
+				ORDER BY fc.sort_order ASC`,
+			)
+			.bind(row.id)
+			.all<CategoryRow>(),
+	]);
+
+	return success(c, {
+		...toClientFilter(row),
+		previews: previews.results.map(toClientPreview),
+		categories: categoryRows.results.map(toClientCategoryRef),
+	});
 });
 
 export { filters as mobileFilterRoutes };

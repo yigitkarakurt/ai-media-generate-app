@@ -58,8 +58,10 @@ src/
     │   └── routes.ts                # GET /api/health, GET /api/version
     ├── mobile/
     │   ├── auth.ts                  # POST /bootstrap, GET /me, POST /logout
+    │   ├── home.ts                  # GET /api/mobile/home (featured + categories)
+    │   ├── filters.ts               # GET /api/mobile/filters, GET /:slug (with previews)
+    │   ├── categories.ts            # GET /api/mobile/categories, GET /:slug/filters
     │   ├── assets.ts                # GET /api/mobile/assets, GET /api/mobile/assets/:id
-    │   ├── filters.ts               # GET /api/mobile/filters
     │   ├── generations.ts           # GET,POST /api/mobile/generations
     │   ├── uploads.ts               # POST /api/mobile/uploads/request, /confirm
     │   ├── billing.ts               # Billing state, coins, entitlements
@@ -70,8 +72,9 @@ src/
     │   ├── users.ts                 # GET /api/admin/users
     │   ├── jobs.ts                  # GET /api/admin/jobs, POST cancel
     │   ├── assets.ts                # GET,DELETE /api/admin/assets
-    │   ├── filters.ts               # Full CRUD /api/admin/filters
+    │   ├── filters.ts               # Full CRUD + previews + category assignments
     │   ├── tags.ts                  # Tag CRUD /api/admin/tags
+    │   ├── categories.ts            # Category CRUD + filter assignments
     │   └── settings.ts             # GET,PUT,DELETE /api/admin/settings
     └── internal/
         └── generations.ts           # POST sync-pending, POST :id/sync
@@ -246,7 +249,24 @@ Adding a new OpenRouter model: create `providers/openrouter/adapters/<model>.ts`
 
 Filters are the backend-controlled product catalog for mobile generation. The mobile client starts generation with a `filter_id`; it never supplies prompts, provider names, model keys, or operation types.
 
-Mobile filter responses are client-safe catalog records:
+### Catalog Data Model
+
+The catalog uses four related entities:
+
+```
+filters ──┬── tags              (one primary tag per filter via tag_id)
+           ├── filter_previews   (multiple preview images per filter)
+           └── filter_categories ─── categories  (many-to-many)
+```
+
+- **Filters** — generation recipes with provider routing, prompts, and billing
+- **Tags** — lightweight UI badges (Popular, New, Editor's Pick, etc.)
+- **Categories** — reusable content sections for the home screen and catalog browsing
+- **Filter Previews** — multiple preview assets per filter (primary + gallery)
+
+### Mobile Catalog Responses
+
+Mobile filter responses are client-safe — backend-only fields are never exposed:
 
 ```json
 {
@@ -256,10 +276,20 @@ Mobile filter responses are client-safe catalog records:
   "description": "Studio-grade portrait lighting with a cinematic finish.",
   "coin_cost": 8,
   "preview_image_url": "https://...",
-  "tag": { "id": "tag-id", "slug": "portrait", "name": "Portrait" },
+  "primary_preview": {
+    "id": "preview-id",
+    "preview_url": "https://...",
+    "media_type": "image"
+  },
+  "tag": { "id": "tag-id", "slug": "popular", "name": "Popular" },
+  "is_featured": true,
   "is_active": true
 }
 ```
+
+Filter detail (`GET /api/mobile/filters/:slug`) additionally includes:
+- `previews` — full preview gallery array
+- `categories` — array of categories this filter belongs to
 
 Backend-only fields remain admin/internal only:
 
@@ -271,35 +301,102 @@ Backend-only fields remain admin/internal only:
 | `prompt_template` | Backend-owned generation prompt |
 | `default_params_json` | Provider-specific defaults |
 
-`preview_image_url` is the current preview strategy. It is a single static image URL shown before the user chooses a filter. Rich before/after previews, video previews, and generated previews are deferred.
-
 Each filter has a required `coin_cost` integer. A value of `0` is free. Generation billing debits the filter's cost before dispatch and refunds it if dispatch fails.
+
+### Featured Filters
+
+Filters can be marked `is_featured = true` with a `featured_sort_order` for the home screen hero section. The mobile home endpoint returns featured filters separately from category sections.
+
+### Categories
+
+Categories are reusable content sections managed via `/api/admin/categories`. A filter can belong to multiple categories through the `filter_categories` join table. Categories have:
+
+- `show_on_home` — whether the category appears as a section on the mobile home screen
+- `home_sort_order` — ordering within the home screen
+- `sort_order` — ordering in the full category listing
+
+### Multiple Previews
+
+Each filter can have multiple preview images via the `filter_previews` table. One preview per filter can be marked `is_primary` (enforced by a partial unique index). Mobile list views show the primary preview; detail views include the full gallery.
+
+Legacy `preview_image_url` on the filter row is preserved as a fallback when no `filter_previews` rows exist.
 
 ### Tags
 
-Tags live in a dedicated `tags` table and are managed through `/api/admin/tags`. A filter may reference at most one tag through `filters.tag_id`. There is intentionally no join table and no multi-tag support.
+Tags live in a dedicated `tags` table and are managed through `/api/admin/tags`. A filter may reference at most one tag through `filters.tag_id` (the primary tag/badge). There is intentionally no join table and no multi-tag support.
 
 Admins create tags separately, then choose an existing `tag_id` when creating or updating a filter. Filter writes reject unknown `tag_id` values with `INVALID_TAG_ID`. Mobile clients receive only tag display data.
 
 Seeded tags:
 
-| Slug | Name |
-|------|------|
-| `portrait` | Portrait |
-| `cinematic` | Cinematic |
-| `artistic` | Artistic |
-| `product` | Product |
+| Slug | Name | Type |
+|------|------|------|
+| `portrait` | Portrait | Style |
+| `cinematic` | Cinematic | Style |
+| `artistic` | Artistic | Style |
+| `product` | Product | Style |
+| `popular` | Popular | Badge |
+| `new` | New | Badge |
+| `editors-pick` | Editor's Pick | Badge |
+| `trending` | Trending | Badge |
+| `premium` | Premium | Badge |
+
+Seeded categories:
+
+| Slug | Name | Show on Home |
+|------|------|:---:|
+| `trending` | Trending | Yes |
+| `portraits` | Portraits | Yes |
+| `product-photography` | Product Photography | Yes |
+| `artistic-styles` | Artistic Styles | Yes |
+| `editors-picks` | Editor's Picks | No |
 
 Seeded filters:
 
-| Slug | Provider | Model Key | Operation | Cost |
-|------|----------|-----------|-----------|------|
-| `cinematic-portrait` | `atlas` | `alibaba/wan-2.7/image-edit` | `image_to_image` | 8 |
-| `product-hero-shot` | `atlas` | `alibaba/wan-2.7/image-edit` | `image_to_image` | 10 |
-| `dream-scene` | `openrouter` | `bytedance-seed/seedream-4.5` | `text_to_image` | 6 |
-| `editorial-remix` | `openrouter` | `bytedance-seed/seedream-4.5` | `image_to_image` | 7 |
+| Slug | Provider | Model Key | Operation | Cost | Tag | Featured |
+|------|----------|-----------|-----------|------|-----|:---:|
+| `cinematic-portrait` | `atlas` | `alibaba/wan-2.7/image-edit` | `image_to_image` | 8 | Popular | Yes |
+| `product-hero-shot` | `atlas` | `alibaba/wan-2.7/image-edit` | `image_to_image` | 10 | New | Yes |
+| `dream-scene` | `openrouter` | `bytedance-seed/seedream-4.5` | `text_to_image` | 6 | Trending | No |
+| `editorial-remix` | `openrouter` | `bytedance-seed/seedream-4.5` | `image_to_image` | 7 | Editor's Pick | No |
 
-Deferred catalog work: many-to-many tags, multi-tag filters, before/after previews, preview videos, dynamic preview generation, client-provided prompts, and client-side provider selection.
+### Home API
+
+`GET /api/mobile/home` returns the data for the mobile home screen:
+
+```json
+{
+  "success": true,
+  "data": {
+    "featured": [
+      { "slug": "cinematic-portrait", "coin_cost": 8, "tag": {...}, "primary_preview": {...} }
+    ],
+    "categories": [
+      {
+        "slug": "trending",
+        "name": "Trending",
+        "filters": [
+          { "slug": "cinematic-portrait", "coin_cost": 8, "tag": {...}, "primary_preview": {...} }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- Featured section: `is_featured = 1` filters, ordered by `featured_sort_order`
+- Category sections: categories with `show_on_home = 1`, each with up to 10 filters
+- All items include primary preview and tag badge
+- No backend-only fields (prompt, provider, etc.) are exposed
+
+### Deferred Catalog Work
+
+- Many-to-many tags (multiple tags per filter)
+- Video preview support (filter_previews.media_type currently image-only)
+- Dynamic preview generation
+- Client-provided prompts
+- Client-side provider selection
+- Quick action backend config (AI Görüntü / Görsel→Video / Metin→Video remain mobile-static)
 
 ## OpenRouter Provider — Seedream 4.5
 
@@ -735,7 +832,9 @@ wrangler secret put INTERNAL_API_KEY
 | Mobile Auth | `/api/mobile/auth` | Mixed | Bootstrap (none), me/logout (Bearer) |
 | Mobile Uploads | `/api/mobile/uploads` | Bearer | Request presigned URLs + confirm uploads |
 | Mobile Assets | `/api/mobile/assets` | Bearer | List/view own assets |
-| Mobile Filters | `/api/mobile/filters` | Bearer | Browse active filters |
+| Mobile Home | `/api/mobile/home` | Bearer | Home screen data (featured + categories) |
+| Mobile Filters | `/api/mobile/filters` | Bearer | Browse active filters (with previews) |
+| Mobile Categories | `/api/mobile/categories` | Bearer | Browse categories and category filters |
 | Mobile Generations | `/api/mobile/generations` | Bearer | Submit and track generation jobs |
 | Mobile Billing | `/api/mobile/billing` | Bearer | Billing state, coins, entitlements |
 | Mobile Devices | `/api/mobile/devices` | Bearer | Register push notification tokens |
@@ -743,8 +842,9 @@ wrangler secret put INTERNAL_API_KEY
 | Admin Users | `/api/admin/users` | Admin | User management |
 | Admin Jobs | `/api/admin/jobs` | Admin | Job monitoring and cancellation |
 | Admin Assets | `/api/admin/assets` | Admin | Asset management |
-| Admin Filters | `/api/admin/filters` | Admin | Filter CRUD |
+| Admin Filters | `/api/admin/filters` | Admin | Filter CRUD + previews + category assignments |
 | Admin Tags | `/api/admin/tags` | Admin | Filter tag CRUD |
+| Admin Categories | `/api/admin/categories` | Admin | Category CRUD + filter assignments |
 | Admin Billing | `/api/admin/billing` | Admin | Product CRUD, coin ops, events |
 | Admin Settings | `/api/admin/settings` | Admin | Key-value config store |
 | Internal Generations | `/api/internal/generations` | Internal | Job sync (single + batch) |
@@ -765,7 +865,10 @@ wrangler secret put INTERNAL_API_KEY
 | `auth_identities` | Future: linked Apple/Google/email identities |
 | `assets` | Uploaded/generated media files with `kind` (input/output), linked to R2 |
 | `filters` | AI generation filter catalog |
-| `tags` | Backend-managed reusable single tags for filters |
+| `tags` | Reusable tags/badges for filters |
+| `categories` | Reusable content sections for catalog browsing |
+| `filter_categories` | Many-to-many join: filters ↔ categories |
+| `filter_previews` | Multiple preview images per filter |
 | `generation_jobs` | Generation job queue with status tracking |
 | `device_push_tokens` | Push notification tokens per device |
 | `admin_settings` | Key-value configuration store |
@@ -918,6 +1021,10 @@ admin product CRUD validation.
 - Advanced financial reporting / full refund reconciliation
 - Mobile RevenueCat SDK integration (client-side)
 - Webhook signature verification beyond shared Bearer secret
+- Quick action backend config (AI Görüntü / Görsel→Video / Metin→Video remain mobile-static)
+- Many-to-many tags (multiple tags per filter — currently one primary tag)
+- Video preview support in filter_previews (currently image-only)
+- Public unauthenticated catalog access
 
 ## Security Hardening Progress
 
