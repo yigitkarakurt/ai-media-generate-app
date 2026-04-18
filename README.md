@@ -279,20 +279,17 @@ Mobile filter responses are client-safe — backend-only fields are never expose
   "description": "Studio-grade portrait lighting with a cinematic finish.",
   "coin_cost": 8,
   "preview_image_url": "https://...",
-  "primary_preview": {
-    "id": "preview-id",
-    "preview_url": "https://...",
-    "media_type": "image"
-  },
+  "previews": [
+    { "id": "preview-1", "preview_url": "https://.../1.jpg", "media_type": "image", "sort_order": 0 },
+    { "id": "preview-2", "preview_url": "https://.../2.jpg", "media_type": "image", "sort_order": 1 }
+  ],
   "tag": { "id": "tag-id", "slug": "popular", "name": "Popular" },
   "is_featured": true,
   "is_active": true
 }
 ```
 
-Filter detail (`GET /api/mobile/filters/:slug`) additionally includes:
-- `previews` — full preview gallery array
-- `categories` — array of categories this filter belongs to
+Every mobile filter item — on home, list, detail, and category listings — carries a `previews` array sorted by `sort_order ASC`. The array is empty when a filter has no preview rows; clients should fall back to `preview_image_url` / `thumbnail_url` in that case. Filter detail (`GET /api/mobile/filters/:slug`) additionally includes a `categories` array of the categories this filter belongs to.
 
 Backend-only fields remain admin/internal only:
 
@@ -320,9 +317,9 @@ Categories are reusable content sections managed via `/api/admin/categories`. A 
 
 ### Multiple Previews
 
-Each filter can have multiple preview images via the `filter_previews` table. One preview per filter can be marked `is_primary` (enforced by a partial unique index). Mobile list views show the primary preview; detail views include the full gallery.
+Each filter can have multiple preview assets via the `filter_previews` table. Admin endpoints still manage an `is_primary` flag (enforced by a partial unique index) for internal/editorial use, but mobile responses never expose it — every mobile endpoint returns the full `previews` array sorted by `sort_order ASC`, and the client decides which to render first.
 
-Legacy `preview_image_url` on the filter row is preserved as a fallback when no `filter_previews` rows exist.
+Legacy `preview_image_url` on the filter row is preserved as a fallback when `previews` is empty.
 
 ### Tags
 
@@ -372,14 +369,14 @@ Seeded filters:
   "success": true,
   "data": {
     "featured": [
-      { "slug": "cinematic-portrait", "coin_cost": 8, "tag": {...}, "primary_preview": {...} }
+      { "slug": "cinematic-portrait", "coin_cost": 8, "tag": {...}, "previews": [{...}, {...}] }
     ],
     "categories": [
       {
         "slug": "trending",
         "name": "Trending",
         "filters": [
-          { "slug": "cinematic-portrait", "coin_cost": 8, "tag": {...}, "primary_preview": {...} }
+          { "slug": "cinematic-portrait", "coin_cost": 8, "tag": {...}, "previews": [{...}, {...}] }
         ]
       }
     ]
@@ -389,7 +386,7 @@ Seeded filters:
 
 - Featured section: `is_featured = 1` filters, ordered by `featured_sort_order`
 - Category sections: categories with `show_on_home = 1`, each with up to 10 filters
-- All items include primary preview and tag badge
+- Every filter carries the full `previews` array (sorted by `sort_order ASC`) and its tag badge
 - No backend-only fields (prompt, provider, etc.) are exposed
 
 ### Deferred Catalog Work

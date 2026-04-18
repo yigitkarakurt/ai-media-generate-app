@@ -3,6 +3,7 @@ import type { AuthedEnv } from "../../middleware/auth";
 import { requireAuth } from "../../middleware/auth";
 import { success } from "../../shared/api-response";
 import type { FilterRow, CategoryRow } from "../../core/db/schema";
+import { fetchPreviewsByFilterIds, type ClientPreview } from "./_previews";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -10,14 +11,11 @@ type HomeCatalogRow = FilterRow & {
 	tag_slug: string | null;
 	tag_name: string | null;
 	tag_is_active: number | null;
-	pp_id: string | null;
-	pp_url: string | null;
-	pp_media_type: string | null;
 };
 
 /* ──────────────── Client-safe transforms ──────────────── */
 
-function toHomeFilter(row: HomeCatalogRow) {
+function toHomeFilter(row: HomeCatalogRow, previews: ClientPreview[]) {
 	return {
 		id: row.id,
 		name: row.name,
@@ -30,11 +28,7 @@ function toHomeFilter(row: HomeCatalogRow) {
 		tag: row.tag_id && row.tag_is_active
 			? { id: row.tag_id, slug: row.tag_slug, name: row.tag_name }
 			: null,
-		primary_preview: row.pp_id
-			? { id: row.pp_id, preview_url: row.pp_url, media_type: row.pp_media_type }
-			: row.preview_image_url
-				? { id: null, preview_url: row.preview_image_url, media_type: "image" }
-				: null,
+		previews,
 	};
 }
 
@@ -54,11 +48,9 @@ const CATALOG_FILTER_SELECT = `
 		   f.input_media_types, f.is_featured, f.is_active,
 		   f.sort_order, f.featured_sort_order, f.tag_id,
 		   f.preview_image_url, f.thumbnail_url,
-		   t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active,
-		   fp.id AS pp_id, fp.preview_url AS pp_url, fp.media_type AS pp_media_type
+		   t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active
 	FROM filters f
-	LEFT JOIN tags t ON t.id = f.tag_id
-	LEFT JOIN filter_previews fp ON fp.filter_id = f.id AND fp.is_primary = 1`;
+	LEFT JOIN tags t ON t.id = f.tag_id`;
 
 /* ──────────────── Router ──────────────── */
 
@@ -110,16 +102,23 @@ home.get("/", async (c) => {
 				.bind(cat.id)
 				.all<HomeCatalogRow>();
 
-			return {
-				...toHomeCategory(cat),
-				filters: filterRows.results.map(toHomeFilter),
-			};
+			return { category: cat, rows: filterRows.results };
 		}),
 	);
 
+	// 4. One bulk preview fetch across every filter we're about to emit.
+	const allFilterIds = [
+		...featuredRows.results.map((r) => r.id),
+		...categorySections.flatMap((s) => s.rows.map((r) => r.id)),
+	];
+	const previewsByFilter = await fetchPreviewsByFilterIds(db, allFilterIds);
+
 	return success(c, {
-		featured: featuredRows.results.map(toHomeFilter),
-		categories: categorySections,
+		featured: featuredRows.results.map((r) => toHomeFilter(r, previewsByFilter.get(r.id) ?? [])),
+		categories: categorySections.map(({ category, rows }) => ({
+			...toHomeCategory(category),
+			filters: rows.map((r) => toHomeFilter(r, previewsByFilter.get(r.id) ?? [])),
+		})),
 	});
 });
 

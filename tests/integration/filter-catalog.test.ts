@@ -58,21 +58,21 @@ describe("filter catalog integration", () => {
 		expect(body.data[0]).not.toHaveProperty("operation_type");
 	});
 
-	it("returns primary_preview from filter_previews when available", async () => {
+	it("returns the full previews array ordered by sort_order", async () => {
 		const { token } = await createAuthenticatedUser();
 		const filter = await insertFilter({
 			slug: "preview-test",
 			preview_image_url: "https://example.test/legacy.jpg",
 		});
 		await insertFilterPreview(filter.id, {
-			preview_url: "https://example.test/primary.jpg",
-			is_primary: 1,
-			sort_order: 0,
-		});
-		await insertFilterPreview(filter.id, {
 			preview_url: "https://example.test/secondary.jpg",
 			is_primary: 0,
 			sort_order: 1,
+		});
+		await insertFilterPreview(filter.id, {
+			preview_url: "https://example.test/primary.jpg",
+			is_primary: 1,
+			sort_order: 0,
 		});
 
 		const response = await appFetch("/api/mobile/filters", {
@@ -80,15 +80,22 @@ describe("filter catalog integration", () => {
 		});
 		const body = await successJson<Record<string, unknown>[]>(response);
 
-		expect(body.data[0]).toMatchObject({
-			primary_preview: expect.objectContaining({
-				preview_url: "https://example.test/primary.jpg",
-				media_type: "image",
-			}),
+		const item = body.data[0] as { previews: { preview_url: string; sort_order: number; media_type: string }[] };
+		expect(item).not.toHaveProperty("primary_preview");
+		expect(item.previews).toHaveLength(2);
+		expect(item.previews[0]).toMatchObject({
+			preview_url: "https://example.test/primary.jpg",
+			sort_order: 0,
+			media_type: "image",
 		});
+		expect(item.previews[1]).toMatchObject({
+			preview_url: "https://example.test/secondary.jpg",
+			sort_order: 1,
+		});
+		expect(item.previews[0]).not.toHaveProperty("is_primary");
 	});
 
-	it("falls back to preview_image_url when no filter_previews exist", async () => {
+	it("returns an empty previews array when no filter_previews exist", async () => {
 		const { token } = await createAuthenticatedUser();
 		await insertFilter({
 			slug: "fallback-test",
@@ -100,12 +107,10 @@ describe("filter catalog integration", () => {
 		});
 		const body = await successJson<Record<string, unknown>[]>(response);
 
-		expect(body.data[0]).toMatchObject({
-			primary_preview: expect.objectContaining({
-				preview_url: "https://example.test/legacy.jpg",
-				media_type: "image",
-			}),
-		});
+		const item = body.data[0] as { previews: unknown[]; preview_image_url: string };
+		expect(item).not.toHaveProperty("primary_preview");
+		expect(item.previews).toEqual([]);
+		expect(item.preview_image_url).toBe("https://example.test/legacy.jpg");
 	});
 
 	/* ═══════════════ Mobile filter detail ═══════════════ */

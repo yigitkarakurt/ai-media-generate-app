@@ -4,6 +4,7 @@ import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import type { CategoryRow, FilterRow } from "../../core/db/schema";
+import { fetchPreviewsByFilterIds } from "./_previews";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -11,9 +12,6 @@ type CategoryFilterRow = FilterRow & {
 	tag_slug: string | null;
 	tag_name: string | null;
 	tag_is_active: number | null;
-	pp_id: string | null;
-	pp_url: string | null;
-	pp_media_type: string | null;
 };
 
 /* ──────────────── Client-safe transforms ──────────────── */
@@ -40,11 +38,6 @@ function toClientFilter(row: CategoryFilterRow) {
 		tag: row.tag_id && row.tag_is_active
 			? { id: row.tag_id, slug: row.tag_slug, name: row.tag_name }
 			: null,
-		primary_preview: row.pp_id
-			? { id: row.pp_id, preview_url: row.pp_url, media_type: row.pp_media_type }
-			: row.preview_image_url
-				? { id: null, preview_url: row.preview_image_url, media_type: "image" }
-				: null,
 	};
 }
 
@@ -91,12 +84,10 @@ categories.get("/:slug/filters", async (c) => {
 				`SELECT f.id, f.name, f.slug, f.description, f.coin_cost,
 						f.input_media_types, f.is_featured, f.is_active,
 						f.sort_order, f.tag_id, f.preview_image_url, f.thumbnail_url,
-						t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active,
-						fp.id AS pp_id, fp.preview_url AS pp_url, fp.media_type AS pp_media_type
+						t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active
 				FROM filter_categories fc
 				JOIN filters f ON f.id = fc.filter_id AND f.is_active = 1
 				LEFT JOIN tags t ON t.id = f.tag_id
-				LEFT JOIN filter_previews fp ON fp.filter_id = f.id AND fp.is_primary = 1
 				WHERE fc.category_id = ?
 				ORDER BY fc.sort_order ASC
 				LIMIT ? OFFSET ?`,
@@ -115,8 +106,17 @@ categories.get("/:slug/filters", async (c) => {
 	]);
 
 	const total = countResult?.total ?? 0;
+	const previewsByFilter = await fetchPreviewsByFilterIds(
+		db,
+		rows.results.map((r) => r.id),
+	);
 
-	return paginated(c, rows.results.map(toClientFilter), {
+	const data = rows.results.map((row) => ({
+		...toClientFilter(row),
+		previews: previewsByFilter.get(row.id) ?? [],
+	}));
+
+	return paginated(c, data, {
 		page,
 		pageSize,
 		total,
