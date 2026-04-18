@@ -122,6 +122,41 @@
           ]
         },
         {
+          "name": "Onboarding",
+          "description": "Backend-controlled onboarding screens. No auth required (shown before login).",
+          "item": [
+            {
+              "name": "Get Onboarding",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "var d = pm.response.json().data;",
+                      "if (d && d.flow && d.flow.id) {",
+                      "  pm.environment.set('onboardingFlowId', d.flow.id);",
+                      "}",
+                      "pm.test('screens is array', () => pm.expect(d.screens).to.be.an('array'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/mobile/onboarding",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "mobile", "onboarding"]
+                }
+              }
+            }
+          ]
+        },
+        {
           "name": "Home",
           "description": "Mobile home screen data — featured filters and category sections.",
           "item": [
@@ -1306,6 +1341,152 @@
                   "host": ["{{baseUrl}}"],
                   "path": ["api", "admin", "settings", ":key"],
                   "variable": [{ "key": "key", "value": "{{settingKey}}" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Onboarding",
+          "description": "Onboarding flow and screen management. Flows group ordered screens; activating a flow deactivates all others.",
+          "item": [
+            {
+              "name": "List Flows",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/flows?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "flows"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create Flow",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) pm.environment.set('onboardingFlowId', d.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"key\": \"default\",\n  \"name\": \"Default Onboarding\",\n  \"is_active\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/flows",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "flows"]
+                }
+              }
+            },
+            {
+              "name": "Update Flow",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Updated Onboarding\",\n  \"is_active\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/flows/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "flows", ":id"],
+                  "variable": [{ "key": "id", "value": "{{onboardingFlowId}}" }]
+                }
+              }
+            },
+            {
+              "name": "List Screens",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/screens?page=1&pageSize=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "screens"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "pageSize", "value": "20" },
+                    { "key": "flow_id", "value": "{{onboardingFlowId}}", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create Screen",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var d = pm.response.json().data;",
+                      "if (d && d.id) pm.environment.set('onboardingScreenId', d.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"flow_id\": \"{{onboardingFlowId}}\",\n  \"title\": \"Create with AI\",\n  \"subtitle\": \"Turn your imagination into reality\",\n  \"description\": \"Generate stunning images and videos from simple text prompts or your own photos.\",\n  \"media_type\": \"video\",\n  \"media_url\": \"https://cdn.example.com/onboarding/create-with-ai.mp4\",\n  \"cta_text\": \"Next\",\n  \"sort_order\": 10,\n  \"is_active\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/screens",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "screens"]
+                }
+              }
+            },
+            {
+              "name": "Update Screen",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Updated Title\",\n  \"media_type\": \"image\",\n  \"media_url\": \"https://cdn.example.com/onboarding/updated.jpg\",\n  \"is_active\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/screens/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "screens", ":id"],
+                  "variable": [{ "key": "id", "value": "{{onboardingScreenId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Delete Screen",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/onboarding/screens/:id",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "admin", "onboarding", "screens", ":id"],
+                  "variable": [{ "key": "id", "value": "{{onboardingScreenId}}" }]
                 }
               }
             }

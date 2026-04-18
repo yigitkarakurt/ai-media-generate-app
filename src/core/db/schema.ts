@@ -248,6 +248,33 @@ export interface AuthIdentityRow {
 	updated_at: string;
 }
 
+/* ──────────────── Onboarding Row Types ──────────────── */
+
+export interface OnboardingFlowRow {
+	id: string;
+	key: string;
+	name: string;
+	is_active: number; // SQLite boolean (0 or 1)
+	created_at: string;
+	updated_at: string;
+}
+
+export interface OnboardingScreenRow {
+	id: string;
+	flow_id: string;
+	title: string;
+	subtitle: string;
+	description: string;
+	media_type: "image" | "gif" | "video";
+	media_url: string;
+	cta_text: string;
+	secondary_cta_text: string | null;
+	sort_order: number;
+	is_active: number; // SQLite boolean (0 or 1)
+	created_at: string;
+	updated_at: string;
+}
+
 /* ──────────────── Tracking Row Types ──────────────── */
 
 export interface TrackingEventRow {

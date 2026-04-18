@@ -7,6 +7,8 @@ import type {
 	FilterCategoryRow,
 	FilterPreviewRow,
 	FilterRow,
+	OnboardingFlowRow,
+	OnboardingScreenRow,
 	TagRow,
 	UserRow,
 } from "../../src/core/db/schema";
@@ -464,6 +466,83 @@ export async function insertFilterPreview(
 		.run();
 
 	return preview;
+}
+
+export async function insertOnboardingFlow(
+	overrides: Partial<OnboardingFlowRow> = {},
+	db: D1Database = env.DB,
+) {
+	const flowId = overrides.id ?? crypto.randomUUID();
+	const now = nowIso();
+	const flow = {
+		id: flowId,
+		key: overrides.key ?? `flow-${flowId}`,
+		name: overrides.name ?? "Test Flow",
+		is_active: overrides.is_active ?? 1,
+		created_at: overrides.created_at ?? now,
+		updated_at: overrides.updated_at ?? now,
+	} satisfies OnboardingFlowRow;
+
+	await db
+		.prepare(
+			`INSERT INTO onboarding_flows (id, key, name, is_active, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(flow.id, flow.key, flow.name, flow.is_active, flow.created_at, flow.updated_at)
+		.run();
+
+	return flow;
+}
+
+export async function insertOnboardingScreen(
+	flowId: string,
+	overrides: Partial<Omit<OnboardingScreenRow, "flow_id">> = {},
+	db: D1Database = env.DB,
+) {
+	const screenId = overrides.id ?? crypto.randomUUID();
+	const now = nowIso();
+	const screen = {
+		id: screenId,
+		flow_id: flowId,
+		title: overrides.title ?? "Test Screen",
+		subtitle: overrides.subtitle ?? "",
+		description: overrides.description ?? "",
+		media_type: overrides.media_type ?? "image",
+		media_url: overrides.media_url ?? "https://example.test/onboarding.jpg",
+		cta_text: overrides.cta_text ?? "Next",
+		secondary_cta_text: overrides.secondary_cta_text ?? null,
+		sort_order: overrides.sort_order ?? 0,
+		is_active: overrides.is_active ?? 1,
+		created_at: overrides.created_at ?? now,
+		updated_at: overrides.updated_at ?? now,
+	} satisfies OnboardingScreenRow;
+
+	await db
+		.prepare(
+			`INSERT INTO onboarding_screens (
+				id, flow_id, title, subtitle, description,
+				media_type, media_url, cta_text, secondary_cta_text,
+				sort_order, is_active, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			screen.id,
+			screen.flow_id,
+			screen.title,
+			screen.subtitle,
+			screen.description,
+			screen.media_type,
+			screen.media_url,
+			screen.cta_text,
+			screen.secondary_cta_text,
+			screen.sort_order,
+			screen.is_active,
+			screen.created_at,
+			screen.updated_at,
+		)
+		.run();
+
+	return screen;
 }
 
 export function makeRevenueCatEvent(

@@ -8,6 +8,8 @@ import type {
 } from "../../src/core/db/schema";
 
 const RESET_TABLES = [
+	"onboarding_screens",
+	"onboarding_flows",
 	"tracking_events",
 	"auth_sessions",
 	"auth_identities",

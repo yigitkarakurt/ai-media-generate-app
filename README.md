@@ -996,6 +996,120 @@ admin product CRUD validation.
 | Allowed video types | MP4, QuickTime (MOV), WebM |
 | Upload URL expiry | 10 minutes |
 
+## Onboarding System
+
+Backend-controlled onboarding content for mobile clients. The mobile app renders onboarding from the API response — no hardcoded screen definitions on the client.
+
+### Schema
+
+Two tables:
+
+- **`onboarding_flows`** — groups screens into a named flow; only one flow should be active at a time
+- **`onboarding_screens`** — individual screens within a flow, ordered by `sort_order`
+
+#### `onboarding_flows`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID |
+| `key` | TEXT UNIQUE | Slug identifier (e.g. `default`) |
+| `name` | TEXT | Human-readable name |
+| `is_active` | INTEGER | 0 or 1; only one flow active at a time |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
+
+#### `onboarding_screens`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID |
+| `flow_id` | TEXT FK | References `onboarding_flows(id)` |
+| `title` | TEXT | Screen title |
+| `subtitle` | TEXT | Short subtitle |
+| `description` | TEXT | Longer description |
+| `media_type` | TEXT | `image`, `gif`, or `video` |
+| `media_url` | TEXT | Public CDN URL to media asset |
+| `cta_text` | TEXT | Primary call-to-action button text |
+| `secondary_cta_text` | TEXT \| NULL | Optional secondary CTA (e.g. "Maybe Later") |
+| `sort_order` | INTEGER | Display order within the flow |
+| `is_active` | INTEGER | 0 or 1; inactive screens excluded from mobile response |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
+
+### Supported media types
+
+| Type | Example use |
+|---|---|
+| `image` | Static screenshot or illustration (JPEG, PNG, WebP) |
+| `gif` | Animated preview or demo loop |
+| `video` | Full video walkthrough (MP4) |
+
+Media files are **not stored in D1** — only metadata and public CDN URLs.
+
+### Mobile endpoint
+
+```
+GET /api/mobile/onboarding
+```
+
+No authentication required (called before login). Returns the active flow and its ordered, active screens:
+
+```json
+{
+  "success": true,
+  "data": {
+    "flow": {
+      "id": "...",
+      "key": "default",
+      "name": "Default Onboarding"
+    },
+    "screens": [
+      {
+        "id": "...",
+        "title": "Create with AI",
+        "subtitle": "Turn your imagination into reality",
+        "description": "Generate stunning images...",
+        "media_type": "video",
+        "media_url": "https://cdn.example.com/onboarding/create-with-ai.mp4",
+        "cta_text": "Next",
+        "secondary_cta_text": null,
+        "sort_order": 10
+      }
+    ]
+  }
+}
+```
+
+When no active flow exists, returns `{ flow: null, screens: [] }`.
+
+The client renders an `OnboardingMedia` component that switches on `media_type` to display image, gif, or video content.
+
+### Admin endpoints
+
+All require `X-Admin-Key` header.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/admin/onboarding/flows` | List flows (paginated) |
+| `POST` | `/api/admin/onboarding/flows` | Create a flow |
+| `PATCH` | `/api/admin/onboarding/flows/:id` | Update a flow |
+| `GET` | `/api/admin/onboarding/screens` | List screens (paginated, optional `?flow_id=`) |
+| `POST` | `/api/admin/onboarding/screens` | Create a screen |
+| `PATCH` | `/api/admin/onboarding/screens/:id` | Update a screen |
+| `DELETE` | `/api/admin/onboarding/screens/:id` | Delete a screen |
+
+Activating a flow automatically deactivates all other flows.
+
+### What remains deferred
+
+- Onboarding completion tracking (per-user state)
+- Localization / multi-language onboarding
+- A/B testing / flow segmentation
+- Platform-specific onboarding variations (iOS vs Android)
+- Dynamic feature flags controlling onboarding
+- Media upload system for onboarding assets (currently URLs are set manually)
+- Client UI implementation
+
 ## Next Implementation Steps
 
 1. **Account linking** — Apple/Google/email login, merging anonymous accounts

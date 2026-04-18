@@ -6,7 +6,7 @@ Postman collection and environment for testing the AI Media Generate backend.
 
 | File | Description |
 |------|-------------|
-| `ai-media-generate-app.postman_collection.json` | Full API collection (v2.1, 68 requests) |
+| `ai-media-generate-app.postman_collection.json` | Full API collection (v2.1, 79 requests) |
 | `local-dev.postman_environment.json` | Local development environment variables |
 
 ## Import
@@ -27,7 +27,7 @@ Most variables are auto-populated by test scripts. Set these before you start:
 | `internalApiKey` | `test-internal-key` | Must match `INTERNAL_API_KEY` in `.dev.vars` (always required) |
 | `revenuecatWebhookSecret` | `test-webhook-secret` | Must match `REVENUECAT_WEBHOOK_SECRET` in `.dev.vars` |
 
-Variables auto-set by test scripts: `authToken`, `userId`, `filterId`, `filterSlug`, `categoryId`, `categorySlug`, `tagId`, `previewId`, `assetId`, `uploadUrl`, `storageKey`, `generationId`, `jobId`, `billingProductId`.
+Variables auto-set by test scripts: `authToken`, `userId`, `filterId`, `filterSlug`, `categoryId`, `categorySlug`, `tagId`, `previewId`, `assetId`, `uploadUrl`, `storageKey`, `generationId`, `jobId`, `billingProductId`, `onboardingFlowId`, `onboardingScreenId`.
 
 ## Authentication
 
@@ -104,6 +104,24 @@ Prerequisites for webhook testing:
 2. The user must have a billing customer record (run **Mobile > Billing > Register Customer**)
 3. The `rc_app_user_id` in the webhook body must match the registered customer
 
+## Onboarding Testing
+
+The onboarding endpoint is public (no auth required) — it's called before login.
+
+1. **Mobile > Onboarding > Get Onboarding** — returns active flow + ordered screens (auto-sets `onboardingFlowId`)
+
+To manage onboarding via admin:
+
+1. **Admin > Onboarding > Create Flow** — create a new flow (auto-sets `onboardingFlowId`)
+2. **Admin > Onboarding > Create Screen** — add screens to the flow (auto-sets `onboardingScreenId`)
+3. **Admin > Onboarding > Update Screen** — edit title, media, sort order, active state
+4. **Admin > Onboarding > List Screens** — view all screens (enable `flow_id` query param to filter)
+5. **Mobile > Onboarding > Get Onboarding** — verify the mobile response
+
+Activating a flow via **Create Flow** or **Update Flow** with `is_active: true` automatically deactivates all other flows.
+
+Supported `media_type` values: `image`, `gif`, `video`.
+
 ## Recommended Test Order
 
 ### Quick smoke test
@@ -146,6 +164,7 @@ Prerequisites for webhook testing:
 Health                          (public, no auth)
 Mobile                          (Bearer token auth)
 ├── Auth                        (Bootstrap is public)
+├── Onboarding                  (public, no auth — pre-login)
 ├── Home                        (featured + categories)
 ├── Categories                  (browse + category filters)
 ├── Filters                     (list + detail with previews)
@@ -163,7 +182,8 @@ Admin                           (X-Admin-Key auth)
 ├── Categories                  (CRUD + filter assignments)
 ├── Filters                     (CRUD + previews + category links)
 ├── Billing                     (products, coins, events)
-└── Settings
+├── Settings
+└── Onboarding                  (flows + screens CRUD)
 Internal                        (X-Internal-Key auth)
 └── Generation sync
 Webhooks
