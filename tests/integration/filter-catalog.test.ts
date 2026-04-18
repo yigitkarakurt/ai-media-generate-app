@@ -43,7 +43,6 @@ describe("filter catalog integration", () => {
 				id: filter.id,
 				slug: "cinematic-portrait",
 				coin_cost: 8,
-				preview_image_url: "https://example.test/portrait-preview.jpg",
 				is_active: true,
 				tag: expect.objectContaining({
 					id: tag.id,
@@ -56,6 +55,8 @@ describe("filter catalog integration", () => {
 		expect(body.data[0]).not.toHaveProperty("provider_name");
 		expect(body.data[0]).not.toHaveProperty("model_key");
 		expect(body.data[0]).not.toHaveProperty("operation_type");
+		expect(body.data[0]).not.toHaveProperty("preview_image_url");
+		expect(body.data[0]).not.toHaveProperty("thumbnail_url");
 	});
 
 	it("returns the full previews array ordered by sort_order", async () => {
@@ -107,10 +108,33 @@ describe("filter catalog integration", () => {
 		});
 		const body = await successJson<Record<string, unknown>[]>(response);
 
-		const item = body.data[0] as { previews: unknown[]; preview_image_url: string };
+		const item = body.data[0] as { previews: unknown[] };
 		expect(item).not.toHaveProperty("primary_preview");
+		expect(item).not.toHaveProperty("preview_image_url");
+		expect(item).not.toHaveProperty("thumbnail_url");
 		expect(item.previews).toEqual([]);
-		expect(item.preview_image_url).toBe("https://example.test/legacy.jpg");
+	});
+
+	it("caps list previews at 3 per filter while detail returns the full gallery", async () => {
+		const { token } = await createAuthenticatedUser();
+		const filter = await insertFilter({ slug: "cap-test" });
+		for (let i = 0; i < 5; i++) {
+			await insertFilterPreview(filter.id, {
+				preview_url: `https://example.test/p${i}.jpg`,
+				is_primary: i === 0 ? 1 : 0,
+				sort_order: i,
+			});
+		}
+
+		const listRes = await appFetch("/api/mobile/filters", { headers: authHeaders(token) });
+		const listBody = await successJson<{ previews: { sort_order: number }[] }[]>(listRes);
+		expect(listBody.data[0].previews).toHaveLength(3);
+		expect(listBody.data[0].previews.map((p) => p.sort_order)).toEqual([0, 1, 2]);
+
+		const detailRes = await appFetch("/api/mobile/filters/cap-test", { headers: authHeaders(token) });
+		const detailBody = await successJson<{ previews: { sort_order: number }[] }>(detailRes);
+		expect(detailBody.data.previews).toHaveLength(5);
+		expect(detailBody.data.previews.map((p) => p.sort_order)).toEqual([0, 1, 2, 3, 4]);
 	});
 
 	/* ═══════════════ Mobile filter detail ═══════════════ */

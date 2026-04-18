@@ -4,7 +4,7 @@ import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import type { FilterRow, FilterPreviewRow, CategoryRow } from "../../core/db/schema";
-import { fetchPreviewsByFilterIds, toClientPreview } from "./_previews";
+import { LIST_PREVIEW_LIMIT, fetchPreviewsByFilterIds, toClientPreview } from "./_previews";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -24,8 +24,6 @@ function toClientFilter(row: FilterCatalogRow) {
 		slug: row.slug,
 		description: row.description,
 		coin_cost: row.coin_cost,
-		preview_image_url: row.preview_image_url || row.thumbnail_url,
-		thumbnail_url: row.thumbnail_url,
 		category: row.category,
 		input_media_types: row.input_media_types,
 		is_active: Boolean(row.is_active),
@@ -94,6 +92,7 @@ filters.get("/", async (c) => {
 	const previewsByFilter = await fetchPreviewsByFilterIds(
 		db,
 		rows.results.map((r) => r.id),
+		LIST_PREVIEW_LIMIT,
 	);
 
 	const data = rows.results.map((row) => ({

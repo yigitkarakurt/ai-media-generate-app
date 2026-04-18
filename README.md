@@ -278,10 +278,10 @@ Mobile filter responses are client-safe — backend-only fields are never expose
   "name": "Cinematic Portrait",
   "description": "Studio-grade portrait lighting with a cinematic finish.",
   "coin_cost": 8,
-  "preview_image_url": "https://...",
   "previews": [
     { "id": "preview-1", "preview_url": "https://.../1.jpg", "media_type": "image", "sort_order": 0 },
-    { "id": "preview-2", "preview_url": "https://.../2.jpg", "media_type": "image", "sort_order": 1 }
+    { "id": "preview-2", "preview_url": "https://.../2.jpg", "media_type": "image", "sort_order": 1 },
+    { "id": "preview-3", "preview_url": "https://.../3.mp4", "media_type": "video", "sort_order": 2 }
   ],
   "tag": { "id": "tag-id", "slug": "popular", "name": "Popular" },
   "is_featured": true,
@@ -289,7 +289,9 @@ Mobile filter responses are client-safe — backend-only fields are never expose
 }
 ```
 
-Every mobile filter item — on home, list, detail, and category listings — carries a `previews` array sorted by `sort_order ASC`. The array is empty when a filter has no preview rows; clients should fall back to `preview_image_url` / `thumbnail_url` in that case. Filter detail (`GET /api/mobile/filters/:slug`) additionally includes a `categories` array of the categories this filter belongs to.
+`previews` is the single source of truth for filter imagery on mobile. It is always present, always sorted by `sort_order ASC`, and can be empty when the filter has no assets yet (clients should render a neutral placeholder in that case). Legacy `preview_image_url` and `thumbnail_url` are no longer exposed on mobile — admin still owns them on `filters`, but the mobile contract is `previews`-only.
+
+Home, list, and category endpoints cap `previews` at the first 3 entries per filter to keep payloads small; filter detail (`GET /api/mobile/filters/:slug`) returns the full gallery plus a `categories` array of the categories this filter belongs to.
 
 Backend-only fields remain admin/internal only:
 
@@ -317,9 +319,14 @@ Categories are reusable content sections managed via `/api/admin/categories`. A 
 
 ### Multiple Previews
 
-Each filter can have multiple preview assets via the `filter_previews` table. Admin endpoints still manage an `is_primary` flag (enforced by a partial unique index) for internal/editorial use, but mobile responses never expose it — every mobile endpoint returns the full `previews` array sorted by `sort_order ASC`, and the client decides which to render first.
+Each filter can have multiple preview assets via the `filter_previews` table. Admin endpoints still manage an `is_primary` flag (enforced by a partial unique index) for internal/editorial use, but mobile responses never expose it.
 
-Legacy `preview_image_url` on the filter row is preserved as a fallback when `previews` is empty.
+Mobile preview contract:
+
+- `previews: [{ id, preview_url, media_type, sort_order }]` — always sorted `sort_order ASC`.
+- Home / list / category-filters endpoints return the first 3 previews per filter for bandwidth reasons.
+- Filter detail returns the full gallery.
+- `preview_image_url` and `thumbnail_url` are admin-side columns and are **not** part of the mobile contract.
 
 ### Tags
 

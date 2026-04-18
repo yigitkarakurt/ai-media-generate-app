@@ -21,10 +21,14 @@ type PreviewLookupRow = Pick<FilterPreviewRow, "id" | "filter_id" | "preview_url
 /**
  * Bulk-fetch previews for a set of filter ids, grouped by filter_id.
  * Each group is ordered by sort_order ASC. Returns an empty map for empty input.
+ *
+ * Pass `perFilterLimit` to cap each group — used by list/home endpoints to
+ * keep payloads small (e.g. 3 previews per filter). Omit for the full gallery.
  */
 export async function fetchPreviewsByFilterIds(
 	db: D1Database,
 	ids: readonly string[],
+	perFilterLimit?: number,
 ): Promise<Map<string, ClientPreview[]>> {
 	const grouped = new Map<string, ClientPreview[]>();
 	if (ids.length === 0) return grouped;
@@ -45,13 +49,19 @@ export async function fetchPreviewsByFilterIds(
 		.all<PreviewLookupRow>();
 
 	for (const row of results) {
-		const bucket = grouped.get(row.filter_id);
-		const preview = toClientPreview(row as FilterPreviewRow);
-		if (bucket) bucket.push(preview);
-		else grouped.set(row.filter_id, [preview]);
+		let bucket = grouped.get(row.filter_id);
+		if (!bucket) {
+			bucket = [];
+			grouped.set(row.filter_id, bucket);
+		}
+		if (perFilterLimit !== undefined && bucket.length >= perFilterLimit) continue;
+		bucket.push(toClientPreview(row as FilterPreviewRow));
 	}
 	return grouped;
 }
+
+/** Max previews returned per filter on home/list/category endpoints. */
+export const LIST_PREVIEW_LIMIT = 3;
 
 export function attachPreviews<T extends { id: string }>(
 	items: T[],

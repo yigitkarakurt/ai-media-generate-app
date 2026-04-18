@@ -4,7 +4,7 @@ import { requireAuth } from "../../middleware/auth";
 import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import type { CategoryRow, FilterRow } from "../../core/db/schema";
-import { fetchPreviewsByFilterIds } from "./_previews";
+import { LIST_PREVIEW_LIMIT, fetchPreviewsByFilterIds } from "./_previews";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -83,7 +83,7 @@ categories.get("/:slug/filters", async (c) => {
 			.prepare(
 				`SELECT f.id, f.name, f.slug, f.description, f.coin_cost,
 						f.input_media_types, f.is_featured, f.is_active,
-						f.sort_order, f.tag_id, f.preview_image_url, f.thumbnail_url,
+						f.sort_order, f.tag_id,
 						t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active
 				FROM filter_categories fc
 				JOIN filters f ON f.id = fc.filter_id AND f.is_active = 1
@@ -109,6 +109,7 @@ categories.get("/:slug/filters", async (c) => {
 	const previewsByFilter = await fetchPreviewsByFilterIds(
 		db,
 		rows.results.map((r) => r.id),
+		LIST_PREVIEW_LIMIT,
 	);
 
 	const data = rows.results.map((row) => ({

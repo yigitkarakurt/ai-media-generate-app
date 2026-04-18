@@ -3,7 +3,7 @@ import type { AuthedEnv } from "../../middleware/auth";
 import { requireAuth } from "../../middleware/auth";
 import { success } from "../../shared/api-response";
 import type { FilterRow, CategoryRow } from "../../core/db/schema";
-import { fetchPreviewsByFilterIds, type ClientPreview } from "./_previews";
+import { LIST_PREVIEW_LIMIT, fetchPreviewsByFilterIds, type ClientPreview } from "./_previews";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -47,7 +47,6 @@ const CATALOG_FILTER_SELECT = `
 	SELECT f.id, f.name, f.slug, f.description, f.coin_cost,
 		   f.input_media_types, f.is_featured, f.is_active,
 		   f.sort_order, f.featured_sort_order, f.tag_id,
-		   f.preview_image_url, f.thumbnail_url,
 		   t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active
 	FROM filters f
 	LEFT JOIN tags t ON t.id = f.tag_id`;
@@ -111,7 +110,7 @@ home.get("/", async (c) => {
 		...featuredRows.results.map((r) => r.id),
 		...categorySections.flatMap((s) => s.rows.map((r) => r.id)),
 	];
-	const previewsByFilter = await fetchPreviewsByFilterIds(db, allFilterIds);
+	const previewsByFilter = await fetchPreviewsByFilterIds(db, allFilterIds, LIST_PREVIEW_LIMIT);
 
 	return success(c, {
 		featured: featuredRows.results.map((r) => toHomeFilter(r, previewsByFilter.get(r.id) ?? [])),
