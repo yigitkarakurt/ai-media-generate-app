@@ -12,6 +12,7 @@ import {
 } from "../../core/billing/queries";
 import type { BillingState } from "../../core/billing/types";
 import type { BillingProductRow } from "../../core/db/schema";
+import { trackEvent, extractRequestContext } from "../../core/tracking/tracker";
 
 /* ──────────────── Validation schemas ──────────────── */
 
@@ -119,6 +120,13 @@ billing.post("/customer", async (c) => {
 	const data = customerSchema.parse(body);
 
 	await upsertCustomer(c.env.DB, userId, data.rc_app_user_id);
+
+	// Track customer link — fire-and-forget, never throws
+	await trackEvent(c.env.DB, "billing_customer_linked", {
+		user_id: userId,
+		ctx: extractRequestContext(c.req),
+		metadata: { rc_app_user_id: data.rc_app_user_id },
+	});
 
 	return success(c, { user_id: userId, rc_app_user_id: data.rc_app_user_id });
 });

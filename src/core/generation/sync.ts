@@ -3,6 +3,7 @@ import { AppError } from "../../shared/errors";
 import { generateStorageKey } from "../../shared/media";
 import type { GenerationJobRow } from "../db/schema";
 import { getProvider } from "./providers";
+import { trackEvent } from "../tracking/tracker";
 
 /* ──────────────── Types ──────────────── */
 
@@ -157,6 +158,16 @@ export async function syncGenerationJob(
 			.bind(result.providerRawStatus, now, now, jobId)
 			.run();
 
+		// Track completion (idempotent path — output already existed)
+		await trackEvent(db, "generation_completed", {
+			user_id: job.user_id,
+			metadata: {
+				generation_id: jobId,
+				output_asset_id: job.output_asset_id,
+				provider_name: job.provider_name,
+			},
+		});
+
 		return {
 			jobId,
 			previousStatus,
@@ -243,6 +254,16 @@ export async function syncGenerationJob(
 		)
 		.bind(result.providerRawStatus, outputAssetId, now, now, jobId)
 		.run();
+
+	// Track completion — fire-and-forget, no HTTP context (scheduled job)
+	await trackEvent(db, "generation_completed", {
+		user_id: job.user_id,
+		metadata: {
+			generation_id: jobId,
+			output_asset_id: outputAssetId,
+			provider_name: job.provider_name,
+		},
+	});
 
 	return {
 		jobId,

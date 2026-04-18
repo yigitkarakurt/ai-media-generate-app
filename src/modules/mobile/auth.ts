@@ -9,6 +9,7 @@ import { bootstrapAuth } from "../../core/auth/bootstrap";
 import { hashToken, revokeSessionByTokenHash } from "../../core/auth/sessions";
 import type { UserRow } from "../../core/db/schema";
 import { checkRateLimit } from "../../lib/rate-limit";
+import { trackEvent, extractRequestContext } from "../../core/tracking/tracker";
 
 /* ──────────────── Validation ──────────────── */
 
@@ -44,6 +45,21 @@ publicRoutes.post("/bootstrap", async (c) => {
 	const body = await c.req.json();
 	const data = bootstrapSchema.parse(body);
 	const result = await bootstrapAuth(c.env.DB, data);
+
+	// Track bootstrap — fire-and-forget, never throws
+	await trackEvent(c.env.DB, "auth_bootstrap", {
+		user_id: result.user.id,
+		ctx: extractRequestContext(c.req),
+		platform: data.platform,
+		app_version: data.app_version,
+		metadata: {
+			installation_id: data.installation_id,
+			device_identifier: data.device_identifier ?? null,
+			recovered: result.recovery.recovered,
+			recovery_method: result.recovery.method,
+		},
+	});
+
 	return success(c, result);
 });
 

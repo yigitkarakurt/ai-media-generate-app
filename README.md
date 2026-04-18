@@ -39,6 +39,8 @@ src/
 │   │   └── process-event.ts         # RevenueCat webhook event processor
 │   ├── db/
 │   │   └── schema.ts               # TypeScript types matching D1 tables
+│   ├── tracking/
+│   │   └── tracker.ts              # extractRequestContext() + fire-and-forget trackEvent()
 │   └── generation/
 │       ├── types.ts                 # Provider-agnostic generation interfaces
 │       ├── dispatch.ts              # Provider router (routes to registered adapters)
@@ -75,7 +77,8 @@ src/
     │   ├── filters.ts               # Full CRUD + previews + category assignments
     │   ├── tags.ts                  # Tag CRUD /api/admin/tags
     │   ├── categories.ts            # Category CRUD + filter assignments
-    │   └── settings.ts             # GET,PUT,DELETE /api/admin/settings
+    │   ├── settings.ts             # GET,PUT,DELETE /api/admin/settings
+    │   └── tracking.ts             # GET /api/admin/tracking/events (paginated)
     └── internal/
         └── generations.ts           # POST sync-pending, POST :id/sync
 ```
@@ -1049,6 +1052,88 @@ admin product CRUD validation.
 - Structured observability (audit log table, request metadata)
 - Admin auth upgrade from shared secret to role-based access
 - CORS configuration for admin web panel
+
+## Tracking & Event Logging
+
+The backend includes a **lightweight, server-side event tracking system**. It logs useful business events into a `tracking_events` D1 table whenever existing backend flows execute. There is no client-side ingestion endpoint and no separate analytics product — just boring, append-only D1 inserts hooked into real code paths.
+
+### How it works
+
+Two small helpers live in `src/core/tracking/tracker.ts`:
+
+- **`extractRequestContext(req)`** — reads `CF-Connecting-IP` (with `X-Forwarded-For` fallback), `User-Agent`, request path, and method from a Hono request. Safe: never throws.
+- **`trackEvent(db, event_name, opts)`** — inserts a row into `tracking_events`. **Fire-and-forget**: any D1 error is caught, logged as `[tracking] insert failed:…`, and swallowed. A tracking failure never breaks a user-facing request.
+
+### Tracked events
+
+| `event_name` | Trigger | Key metadata |
+|---|---|---|
+| `auth_bootstrap` | `POST /api/mobile/auth/bootstrap` success | `installation_id`, `device_identifier`, `recovered`, `recovery_method` |
+| `billing_customer_linked` | `POST /api/mobile/billing/customer` success | `rc_app_user_id` |
+| `generation_created` | `POST /api/mobile/generations` dispatch success | `generation_id`, `filter_id`, `provider_name`, `operation_type` |
+| `generation_completed` | Scheduled sync marks a job completed | `generation_id`, `output_asset_id`, `provider_name` |
+| `coin_pack_purchased` | RevenueCat `NON_RENEWING_PURCHASE` / `INITIAL_PURCHASE` processed | `rc_product_id`, `coin_amount` |
+| `subscription_activated` | RevenueCat `INITIAL_PURCHASE` / `RENEWAL` subscription processed | `rc_product_id`, `entitlement_id`, `event_type` |
+
+Billing tracking fires **after** `db.batch()` succeeds, so it only records events where the actual side effect (coin grant / entitlement upsert) was committed.
+
+### Table schema (`tracking_events`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID |
+| `user_id` | TEXT \| NULL | NULL for unauthenticated events |
+| `event_name` | TEXT | Event identifier (see table above) |
+| `ip_address` | TEXT \| NULL | From `CF-Connecting-IP`; NULL for scheduled events |
+| `user_agent` | TEXT \| NULL | From `User-Agent` header; NULL for scheduled events |
+| `path` | TEXT \| NULL | Request path; NULL for scheduled events |
+| `method` | TEXT \| NULL | HTTP method; NULL for scheduled events |
+| `platform` | TEXT \| NULL | `'ios'` \| `'android'` where available |
+| `app_version` | TEXT \| NULL | App version string where available |
+| `metadata` | TEXT \| NULL | Compact JSON; scoped to useful business fields only |
+| `created_at` | TEXT | ISO 8601, immutable |
+
+Rows are **append-only**. There is no `updated_at` column.
+
+### Privacy & safety
+
+- No secrets, bearer tokens, or raw request bodies are ever logged
+- `CF-Connecting-IP` is the source of truth for IP; the raw `X-Forwarded-For` chain is not stored
+- Metadata is explicitly scoped per event — there is no catch-all payload dump
+- Only the first IPv4/v6 address from `X-Forwarded-For` is used if `CF-Connecting-IP` is absent
+
+### Admin read endpoint
+
+```
+GET /api/admin/tracking/events
+```
+
+Requires `X-Admin-Key` header (same as all admin routes).
+
+Query parameters:
+
+| Param | Default | Description |
+|---|---|---|
+| `page` | `1` | Page number |
+| `pageSize` | `20` | Rows per page |
+| `event_name` | — | Filter by exact event name |
+| `user_id` | — | Filter by user ID |
+
+Results are sorted **newest first**.
+
+### What is intentionally deferred
+
+The following are **out of scope** for this tracking system:
+
+- Mobile-client-initiated event ingestion endpoint
+- Meta / Google Ads / Apple Search Ads API integrations
+- Campaign attribution and UTM parsing
+- Dashboard or BI reporting layer
+- Event streaming (Cloudflare Queues, etc.)
+- Background aggregation / rollup jobs
+- Real-time alerting
+
+---
 
 ### Production Deployment Checklist
 

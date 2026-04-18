@@ -13,6 +13,7 @@ import { toClientAsset } from "../../core/assets/client";
 import { createGenerationDebit, refundGenerationDebit } from "../../core/billing/queries";
 import { atomicDebit, ensureWallet, getWalletBalance, creditWallet } from "../../core/billing/wallet";
 import { checkRateLimit } from "../../lib/rate-limit";
+import { trackEvent, extractRequestContext } from "../../core/tracking/tracker";
 
 /* ──────────────── Validation schemas ──────────────── */
 
@@ -287,6 +288,18 @@ generations.post("/", async (c) => {
 		.prepare("SELECT * FROM generation_jobs WHERE id = ?")
 		.bind(jobId)
 		.first<GenerationJobRow>();
+
+	// Track generation created — fire-and-forget, never throws
+	await trackEvent(c.env.DB, "generation_created", {
+		user_id: userId,
+		ctx: extractRequestContext(c.req),
+		metadata: {
+			generation_id: jobId,
+			filter_id: data.filter_id,
+			provider_name: dispatchResult.providerName,
+			operation_type: operationType ?? null,
+		},
+	});
 
 	return success(c, toClientJob(job!), 201);
 });

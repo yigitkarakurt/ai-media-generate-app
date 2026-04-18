@@ -25,6 +25,7 @@ import { adminSettingRoutes } from "./modules/admin/settings";
 import { internalGenerationRoutes } from "./modules/internal/generations";
 import { mobileBillingRoutes } from "./modules/mobile/billing";
 import { adminBillingRoutes } from "./modules/admin/billing";
+import { adminTrackingRoutes } from "./modules/admin/tracking";
 import { revenuecatWebhookRoutes } from "./modules/webhooks/revenuecat";
 import { handleScheduled } from "./core/generation/scheduled";
 import { requireAdmin } from "./middleware/admin-auth";
@@ -83,6 +84,7 @@ app.route("/api/admin/tags", adminTagRoutes);
 app.route("/api/admin/categories", adminCategoryRoutes);
 app.route("/api/admin/settings", adminSettingRoutes);
 app.route("/api/admin/billing", adminBillingRoutes);
+app.route("/api/admin/tracking", adminTrackingRoutes);
 
 // Internal routes (service-to-service, require shared secret)
 app.use("/api/internal/*", requireInternal);

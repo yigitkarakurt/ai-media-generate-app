@@ -9,6 +9,7 @@ import {
 	hasCoinEntryForRCEvent,
 } from "./queries";
 import { buildWalletCredit, buildWalletDebit } from "./wallet";
+import { trackEvent } from "../tracking/tracker";
 
 /* ──────────────── Main processor ──────────────── */
 
@@ -229,6 +230,37 @@ export async function processRevenueCatEvent(
 
 	// 6. Batch write: event record + all side effects atomically
 	await db.batch([eventStmt, ...sideEffects]);
+
+	// 7. Best-effort tracking — emit after batch succeeds; never throws
+	if (status === "processed" && product) {
+		if (
+			(event.type === "INITIAL_PURCHASE" || event.type === "RENEWAL") &&
+			product.type === "subscription"
+		) {
+			await trackEvent(db, "subscription_activated", {
+				user_id: userId,
+				metadata: {
+					rc_product_id: product.rc_product_id,
+					entitlement_id: product.entitlement_id ?? "premium",
+					event_type: event.type,
+				},
+			});
+		} else if (
+			(event.type === "INITIAL_PURCHASE" ||
+				event.type === "RENEWAL" ||
+				event.type === "NON_RENEWING_PURCHASE") &&
+			product.type === "coin_pack" &&
+			product.coin_amount
+		) {
+			await trackEvent(db, "coin_pack_purchased", {
+				user_id: userId,
+				metadata: {
+					rc_product_id: product.rc_product_id,
+					coin_amount: product.coin_amount,
+				},
+			});
+		}
+	}
 
 	return { status, event_id: eventId };
 }

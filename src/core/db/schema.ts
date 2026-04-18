@@ -247,3 +247,19 @@ export interface AuthIdentityRow {
 	created_at: string;
 	updated_at: string;
 }
+
+/* ──────────────── Tracking Row Types ──────────────── */
+
+export interface TrackingEventRow {
+	id: string;
+	user_id: string | null;
+	event_name: string;
+	ip_address: string | null;
+	user_agent: string | null;
+	path: string | null;
+	method: string | null;
+	platform: string | null;
+	app_version: string | null;
+	metadata: string | null; // compact JSON string
+	created_at: string;
+}

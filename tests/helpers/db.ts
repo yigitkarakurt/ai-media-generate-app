@@ -3,10 +3,12 @@ import type {
 	BillingEventRow,
 	CoinLedgerRow,
 	GenerationJobRow,
+	TrackingEventRow,
 	UserEntitlementRow,
 } from "../../src/core/db/schema";
 
 const RESET_TABLES = [
+	"tracking_events",
 	"auth_sessions",
 	"auth_identities",
 	"user_devices",
@@ -103,4 +105,27 @@ export async function getWalletBalance(userId: string, db: D1Database = env.DB) 
 		.bind(userId)
 		.first<{ balance: number }>();
 	return row?.balance ?? 0;
+}
+
+/**
+ * Fetch tracking events, optionally filtered by event_name.
+ * Ordered by created_at ASC so tests can reason about insertion order.
+ */
+export async function getTrackingEvents(
+	eventName?: string,
+	db: D1Database = env.DB,
+) {
+	if (eventName) {
+		const result = await db
+			.prepare(
+				"SELECT * FROM tracking_events WHERE event_name = ? ORDER BY created_at ASC",
+			)
+			.bind(eventName)
+			.all<TrackingEventRow>();
+		return result.results;
+	}
+	const result = await db
+		.prepare("SELECT * FROM tracking_events ORDER BY created_at ASC")
+		.all<TrackingEventRow>();
+	return result.results;
 }
