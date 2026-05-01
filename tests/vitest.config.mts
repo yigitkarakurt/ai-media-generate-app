@@ -22,6 +22,7 @@ export default defineConfig({
 				bindings: {
 					MIGRATIONS: migrations,
 					ENVIRONMENT: "test",
+					ADMIN_PANEL_ORIGIN: "https://ai-media-generate-admin.pages.dev",
 					ADMIN_API_KEY: "test-admin-key",
 					INTERNAL_API_KEY: "test-internal-key",
 					REVENUECAT_WEBHOOK_SECRET: "test-revenuecat-secret",

@@ -871,6 +871,25 @@ is explicitly set to `development` or `test`.
 wrangler secret put ADMIN_API_KEY
 ```
 
+### Admin panel CORS
+
+Admin browser access to `/api/admin/*` is controlled by a CORS allowlist.
+`ADMIN_PANEL_ORIGIN` accepts one origin or a comma-separated list of origins.
+
+- Production only allows origins explicitly listed in `ADMIN_PANEL_ORIGIN`.
+- Development and test also allow `http(s)://localhost:*`, `127.0.0.1:*`, and `http(s)://[::1]:*`.
+- Preflight `OPTIONS` requests return `204` without requiring `X-Admin-Key`.
+- Actual admin requests still require a valid `X-Admin-Key`; CORS does not bypass auth.
+
+Allowed request headers:
+`Content-Type`, `Authorization`, `X-Admin-Key`, `X-Internal-Key`
+
+Example:
+
+```txt
+ADMIN_PANEL_ORIGIN=https://ai-media-generate-admin.pages.dev
+```
+
 ### Internal route auth
 
 All `/api/internal/*` routes are protected by the `requireInternal` middleware.
@@ -970,6 +989,7 @@ All endpoints return consistent JSON:
 | `REVENUECAT_WEBHOOK_SECRET` | Secret | RevenueCat webhook Bearer token |
 | `ADMIN_API_KEY` | Secret | Admin panel API key (`X-Admin-Key` header) |
 | `INTERNAL_API_KEY` | Secret | Internal route API key (`X-Internal-Key` header) |
+| `ADMIN_PANEL_ORIGIN` | Variable | Allowed admin browser origin(s), comma-separated if needed |
 
 ## Development
 
@@ -996,6 +1016,10 @@ wrangler secret put OPENROUTER_API_KEY
 wrangler secret put REVENUECAT_WEBHOOK_SECRET
 wrangler secret put ADMIN_API_KEY
 wrangler secret put INTERNAL_API_KEY
+
+# Set the admin panel origin allowlist as a Worker variable
+# Example:
+# ADMIN_PANEL_ORIGIN=https://ai-media-generate-admin.pages.dev
 
 # Deploy
 npm run deploy
@@ -1222,7 +1246,7 @@ Activating a flow automatically deactivates all other flows.
 - Orphan R2 object cleanup on admin delete
 - Structured observability (audit log table, request metadata)
 - Admin auth upgrade from shared secret to role-based access
-- CORS configuration for admin web panel
+- Admin audit logging for privileged mutations
 
 ## Tracking & Event Logging
 

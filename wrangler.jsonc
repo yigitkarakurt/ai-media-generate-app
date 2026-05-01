@@ -37,4 +37,6 @@
 	// - REVENUECAT_WEBHOOK_SECRET
 	// - ADMIN_API_KEY
 	// - INTERNAL_API_KEY
+	// Variables:
+	// - ADMIN_PANEL_ORIGIN (e.g. https://ai-media-generate-admin.pages.dev)
 }

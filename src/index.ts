@@ -31,6 +31,7 @@ import { adminOnboardingRoutes } from "./modules/admin/onboarding";
 import { revenuecatWebhookRoutes } from "./modules/webhooks/revenuecat";
 import { handleScheduled } from "./core/generation/scheduled";
 import { requireAdmin } from "./middleware/admin-auth";
+import { adminCors, handleAdminPreflight } from "./middleware/admin-cors";
 import { requireInternal } from "./middleware/internal-auth";
 
 const app = new Hono<AppEnv>();
@@ -77,6 +78,8 @@ app.route("/api/mobile/billing", mobileBillingRoutes);
 app.route("/api/mobile/onboarding", mobileOnboardingRoutes);
 
 // Admin panel routes (all require admin key)
+app.use("/api/admin/*", adminCors);
+app.options("/api/admin/*", handleAdminPreflight);
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin/dashboard", adminDashboardRoutes);
 app.route("/api/admin/users", adminUserRoutes);

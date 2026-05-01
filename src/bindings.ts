@@ -5,6 +5,7 @@ export interface AppBindings {
 	MEDIA_BUCKET: R2Bucket;
 	JWT_SECRET: string;
 	ENVIRONMENT: string;
+	ADMIN_PANEL_ORIGIN?: string;
 	// R2 S3-compatible API credentials (for presigned URLs via aws4fetch)
 	R2_ACCESS_KEY_ID: string;
 	R2_SECRET_ACCESS_KEY: string;
