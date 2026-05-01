@@ -261,6 +261,7 @@ export async function insertFilter(
 ) {
 	const filterId = overrides.id ?? crypto.randomUUID();
 	const now = nowIso();
+	const operationType = overrides.operation_type ?? "image_to_image";
 	const filter = {
 		id: filterId,
 		name: overrides.name ?? "Test Filter",
@@ -279,10 +280,18 @@ export async function insertFilter(
 		tag_id: overrides.tag_id ?? null,
 		preview_image_url: overrides.preview_image_url ?? "https://example.test/preview.png",
 		model_key: overrides.model_key ?? overrides.provider_model_id ?? "atlas-test-model",
-		operation_type: overrides.operation_type ?? "image_to_image",
+		operation_type: operationType,
 		is_featured: overrides.is_featured ?? 0,
 		featured_sort_order: overrides.featured_sort_order ?? 0,
 		sort_order: overrides.sort_order ?? 0,
+		// Input requirement fields (migration 0014)
+		requires_media: overrides.requires_media ?? 1,
+		input_media_type: overrides.input_media_type ?? "image",
+		min_media_count: overrides.min_media_count ?? 1,
+		max_media_count: overrides.max_media_count ?? 1,
+		supported_mime_types_json: overrides.supported_mime_types_json ?? '["image/jpeg","image/png","image/webp"]',
+		max_file_size_mb: overrides.max_file_size_mb ?? 15,
+		output_media_type: overrides.output_media_type ?? (operationType === "image_to_video" ? "video" : "image"),
 		created_at: overrides.created_at ?? now,
 		updated_at: overrides.updated_at ?? now,
 	} satisfies FilterRow;
@@ -294,8 +303,11 @@ export async function insertFilter(
 				provider_model_id, config, input_media_types, provider_name,
 				prompt_template, default_params_json, is_active, coin_cost,
 				tag_id, preview_image_url, model_key, operation_type, is_featured,
-				featured_sort_order, sort_order, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				featured_sort_order, sort_order,
+				requires_media, input_media_type, min_media_count, max_media_count,
+				supported_mime_types_json, max_file_size_mb, output_media_type,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			filter.id,
@@ -319,6 +331,13 @@ export async function insertFilter(
 			filter.is_featured,
 			filter.featured_sort_order,
 			filter.sort_order,
+			filter.requires_media,
+			filter.input_media_type,
+			filter.min_media_count,
+			filter.max_media_count,
+			filter.supported_mime_types_json,
+			filter.max_file_size_mb,
+			filter.output_media_type,
 			filter.created_at,
 			filter.updated_at,
 		)

@@ -4,6 +4,7 @@ import { requireAuth } from "../../middleware/auth";
 import { success } from "../../shared/api-response";
 import type { FilterRow, CategoryRow } from "../../core/db/schema";
 import { LIST_PREVIEW_LIMIT, fetchPreviewsByFilterIds, type ClientPreview } from "./_previews";
+import { buildGenerationSchema } from "./_generation_schema";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -28,6 +29,7 @@ function toHomeFilter(row: HomeCatalogRow, previews: ClientPreview[]) {
 		tag: row.tag_id && row.tag_is_active
 			? { id: row.tag_id, slug: row.tag_slug, name: row.tag_name }
 			: null,
+		generation_schema: buildGenerationSchema(row),
 		previews,
 	};
 }
@@ -47,6 +49,10 @@ const CATALOG_FILTER_SELECT = `
 	SELECT f.id, f.name, f.slug, f.description, f.coin_cost,
 		   f.input_media_types, f.is_featured, f.is_active,
 		   f.sort_order, f.featured_sort_order, f.tag_id,
+		   f.operation_type, f.output_media_type,
+		   f.requires_media, f.input_media_type,
+		   f.min_media_count, f.max_media_count,
+		   f.supported_mime_types_json, f.max_file_size_mb,
 		   t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active
 	FROM filters f
 	LEFT JOIN tags t ON t.id = f.tag_id`;

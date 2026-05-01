@@ -17,11 +17,44 @@ import { trackEvent, extractRequestContext } from "../../core/tracking/tracker";
 
 /* ──────────────── Validation schemas ──────────────── */
 
-const createGenerationSchema = z.object({
-	filter_id: z.string().uuid(),
-	input_asset_id: z.string().uuid(),
-	params: z.record(z.unknown()).optional().default({}),
-});
+/**
+ * Generation create request shape.
+ *
+ * - filter_id:       required — which filter/effect to apply
+ * - input_asset_ids: preferred plural form; provide one or more asset IDs
+ * - input_asset_id:  legacy singular form; normalized to input_asset_ids[0]
+ * - user_prompt:     MUST NOT be provided — filter prompts are backend-owned
+ * - params:          optional extra params (passed through to provider)
+ *
+ * Backward compatibility: clients that still send input_asset_id will continue
+ * to work. The singular value is normalized to input_asset_ids[0] internally.
+ */
+const createGenerationSchema = z
+	.object({
+		filter_id: z.string().uuid(),
+		// Preferred plural form
+		input_asset_ids: z.array(z.string().uuid()).min(1).optional(),
+		// Legacy singular form — kept for backward compat
+		input_asset_id: z.string().uuid().optional(),
+		// User-supplied prompts are never allowed for filter generation.
+		// This field is declared so we can give a clear error if it appears.
+		user_prompt: z.never({
+			errorMap: () => ({
+				message: "user_prompt must not be provided for filter generation. Prompts are backend-owned.",
+			}),
+		}).optional(),
+		params: z.record(z.unknown()).optional().default({}),
+	})
+	.superRefine((val, ctx) => {
+		// At least one of input_asset_ids or input_asset_id must be provided
+		if (!val.input_asset_ids?.length && !val.input_asset_id) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["input_asset_ids"],
+				message: "At least one input asset is required. Provide input_asset_ids or input_asset_id.",
+			});
+		}
+	});
 
 const listGenerationsQuery = paginationQuery.extend({
 	status: z.string().optional(),
@@ -57,9 +90,17 @@ generations.use("/*", requireAuth);
 /**
  * POST /api/mobile/generations
  *
- * Submit a new generation job.
- * Validates the input asset, filter, and their compatibility,
- * creates a job record, then dispatches to the provider stub.
+ * Submit a new generation job for a filter/effect template.
+ *
+ * The prompt is always sourced from the filter's backend-controlled
+ * prompt_template. The client must never supply or override the prompt.
+ *
+ * Validates:
+ * - user_prompt must not be present
+ * - input asset(s) provided and owned by user
+ * - asset count within filter's min/max_media_count
+ * - asset type matches filter's input_media_type
+ * - filter is active and has a valid prompt_template
  */
 generations.post("/", async (c) => {
 	const userId = c.get("userId");
@@ -72,34 +113,35 @@ generations.post("/", async (c) => {
 		throw AppError.tooManyRequests("Too many generation requests. Please try again later.");
 	}
 
-	const body = await c.req.json();
-	const data = createGenerationSchema.parse(body);
+	// ── Parse and validate body ──
+	const rawBody = await c.req.json() as Record<string, unknown>;
 
-	/* ── Verify input asset ── */
-	const asset = await db
-		.prepare("SELECT * FROM assets WHERE id = ? AND user_id = ?")
-		.bind(data.input_asset_id, userId)
-		.first<AssetRow>();
-
-	if (!asset) {
-		throw AppError.notFound("Input asset");
-	}
-
-	// Only uploaded assets can be used for generation
-	if (asset.status !== "uploaded") {
+	// Explicit early rejection of user_prompt before schema parsing
+	// gives a clean, descriptive error code rather than a Zod parse error.
+	if ("user_prompt" in rawBody) {
 		throw AppError.badRequest(
-			"ASSET_NOT_READY",
-			`Input asset is in '${asset.status}' status. Only 'uploaded' assets can be used for generation.`,
+			"PROMPT_NOT_ALLOWED",
+			"user_prompt must not be provided for filter generation. Filter prompts are owned by the backend.",
 		);
 	}
 
-	// Must be an input asset
-	if (asset.kind !== "input") {
+	const parseResult = createGenerationSchema.safeParse(rawBody);
+	if (!parseResult.success) {
+		const firstIssue = parseResult.error.issues[0];
+		const path = firstIssue.path.join(".");
+		const isAssetMissing = path === "input_asset_ids";
+
 		throw AppError.badRequest(
-			"INVALID_ASSET_KIND",
-			"Only input assets can be used for generation.",
+			isAssetMissing ? "MISSING_INPUT_ASSETS" : "VALIDATION_ERROR",
+			firstIssue.message,
 		);
 	}
+	const data = parseResult.data;
+
+	// Normalize: singular input_asset_id → input_asset_ids[0]
+	const assetIds: string[] = data.input_asset_ids?.length
+		? data.input_asset_ids
+		: [data.input_asset_id!];
 
 	/* ── Verify filter ── */
 	const filter = await db
@@ -118,14 +160,79 @@ generations.post("/", async (c) => {
 		);
 	}
 
-	// Check media type compatibility
-	const acceptedTypes = filter.input_media_types.split(",").map((t) => t.trim());
-	if (!acceptedTypes.includes(asset.type)) {
+	// Reject if the filter has no backend prompt (invalid filter config)
+	if (!filter.prompt_template || filter.prompt_template.trim() === "") {
+		console.error(`[generation] Filter ${filter.id} (${filter.slug}) has no prompt_template`);
+		throw AppError.internal("This filter is not properly configured.");
+	}
+
+	// Reject text_to_image / text_to_video — these are not filter operations
+	if (filter.operation_type === "text_to_image" || filter.operation_type === "text_to_video") {
+		console.error(`[generation] Filter ${filter.id} has unsupported operation_type=${filter.operation_type}`);
+		throw AppError.internal("This filter is not properly configured.");
+	}
+
+	/* ── Validate asset count ── */
+	const minCount = filter.min_media_count ?? 1;
+	const maxCount = filter.max_media_count ?? 1;
+
+	if (assetIds.length < minCount) {
 		throw AppError.badRequest(
-			"MEDIA_TYPE_INCOMPATIBLE",
-			`Filter '${filter.name}' does not accept '${asset.type}' input. Accepted: ${filter.input_media_types}.`,
+			"MISSING_INPUT_ASSETS",
+			`This filter requires at least ${minCount} input asset(s). Provided: ${assetIds.length}.`,
 		);
 	}
+
+	if (assetIds.length > maxCount) {
+		throw AppError.badRequest(
+			"TOO_MANY_INPUT_ASSETS",
+			`This filter accepts at most ${maxCount} input asset(s). Provided: ${assetIds.length}.`,
+		);
+	}
+
+	/* ── Verify all input assets ── */
+	const assets: AssetRow[] = [];
+	const expectedMediaType = filter.input_media_type || "image";
+
+	for (const assetId of assetIds) {
+		const asset = await db
+			.prepare("SELECT * FROM assets WHERE id = ? AND user_id = ?")
+			.bind(assetId, userId)
+			.first<AssetRow>();
+
+		if (!asset) {
+			throw AppError.notFound(`Input asset (${assetId})`);
+		}
+
+		// Only uploaded assets can be used for generation
+		if (asset.status !== "uploaded") {
+			throw AppError.badRequest(
+				"ASSET_NOT_READY",
+				`Input asset is in '${asset.status}' status. Only 'uploaded' assets can be used for generation.`,
+			);
+		}
+
+		// Must be an input asset
+		if (asset.kind !== "input") {
+			throw AppError.badRequest(
+				"INVALID_ASSET_KIND",
+				"Only input assets can be used for generation.",
+			);
+		}
+
+		// Asset type must match filter's required input_media_type
+		if (asset.type !== expectedMediaType) {
+			throw AppError.badRequest(
+				"MEDIA_TYPE_INCOMPATIBLE",
+				`Filter '${filter.name}' requires '${expectedMediaType}' input, but asset is '${asset.type}'.`,
+			);
+		}
+
+		assets.push(asset);
+	}
+
+	// Primary asset (first) is used for dispatch; multi-asset dispatch is deferred
+	const primaryAsset = assets[0];
 
 	/* ── Atomic coin debit ── */
 	const coinCost = filter.coin_cost ?? 0;
@@ -160,7 +267,7 @@ generations.post("/", async (c) => {
 			jobId,
 			userId,
 			data.filter_id,
-			data.input_asset_id,
+			primaryAsset.id,
 			Object.keys(data.params).length > 0 ? JSON.stringify(data.params) : null,
 			now,
 			now,
@@ -178,6 +285,15 @@ generations.post("/", async (c) => {
 	const modelKey = filter.model_key || filter.provider_model_id;
 	const operationType = filter.operation_type
 		|| (typeof filterConfig.operation_type === "string" ? filterConfig.operation_type : undefined);
+
+	// Reject unsupported operation types at dispatch time
+	if (operationType === "image_to_video") {
+		// image_to_video is supported in the catalog schema but provider dispatch
+		// may not yet be implemented. Let the provider return an error naturally
+		// rather than silently skipping — this gives a clean failure.
+		console.log(`[generation] image_to_video dispatch for job ${jobId} via provider ${filter.provider_name}`);
+	}
+
 	const dispatchConfig = {
 		...filterConfig,
 		model_key: modelKey,
@@ -187,7 +303,12 @@ generations.post("/", async (c) => {
 		? (JSON.parse(filter.default_params_json) as Record<string, unknown>)
 		: null;
 
-	const inputImageUrl = await createPresignedReadUrl(c.env, asset.storage_key);
+	const inputImageUrl = await createPresignedReadUrl(c.env, primaryAsset.storage_key);
+	// Build URLs for all assets; providers that support multi-image can use the full list.
+	// For now dispatch uses inputImageUrls[0].
+	const allInputUrls = await Promise.all(
+		assets.map((a) => createPresignedReadUrl(c.env, a.storage_key)),
+	);
 
 	let dispatchResult;
 	try {
@@ -196,12 +317,12 @@ generations.post("/", async (c) => {
 				jobId,
 				filterModelId: modelKey,
 				filterConfig: dispatchConfig,
-				inputStorageKey: asset.storage_key,
-				inputMediaType: asset.type,
+				inputStorageKey: primaryAsset.storage_key,
+				inputMediaType: primaryAsset.type,
 				params: data.params,
 				providerName: filter.provider_name,
 				prompt: filter.prompt_template,
-				inputImageUrls: [inputImageUrl],
+				inputImageUrls: allInputUrls,
 				defaultParams,
 			},
 			c.env,

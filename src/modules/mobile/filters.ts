@@ -5,6 +5,7 @@ import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import type { FilterRow, FilterPreviewRow, CategoryRow } from "../../core/db/schema";
 import { LIST_PREVIEW_LIMIT, fetchPreviewsByFilterIds, toClientPreview } from "./_previews";
+import { buildGenerationSchema } from "./_generation_schema";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -36,6 +37,7 @@ function toClientFilter(row: FilterCatalogRow) {
 			}
 			: null,
 		sort_order: row.sort_order,
+		generation_schema: buildGenerationSchema(row),
 		created_at: row.created_at,
 		updated_at: row.updated_at,
 	};
@@ -131,8 +133,8 @@ filters.get("/:slug", async (c) => {
 		db
 			.prepare(
 				`SELECT c.id, c.slug, c.name, c.description, c.sort_order,
-						c.is_active, c.show_on_home, c.home_sort_order,
-						c.created_at, c.updated_at
+					c.is_active, c.show_on_home, c.home_sort_order,
+					c.created_at, c.updated_at
 				FROM filter_categories fc
 				JOIN categories c ON c.id = fc.category_id AND c.is_active = 1
 				WHERE fc.filter_id = ?

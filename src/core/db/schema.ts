@@ -51,9 +51,18 @@ export interface FilterRow {
 	tag_id: string | null; // primary tag (badge) for this filter
 	preview_image_url: string;
 	model_key: string;
-	operation_type: "text_to_image" | "image_to_image" | string;
+	operation_type: "image_to_image" | "image_to_video" | string;
 	is_featured: number; // SQLite boolean (0 or 1)
 	featured_sort_order: number;
+	// ── Input requirement fields (added in migration 0014) ──
+	requires_media: number; // SQLite boolean (0 or 1)
+	input_media_type: string; // 'image' | 'video'
+	min_media_count: number;
+	max_media_count: number;
+	supported_mime_types_json: string; // JSON array string
+	max_file_size_mb: number;
+	output_media_type: string; // 'image' | 'video'
+	// ────────────────────────────────────────────────────────
 	sort_order: number;
 	created_at: string;
 	updated_at: string;

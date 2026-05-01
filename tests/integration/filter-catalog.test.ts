@@ -352,17 +352,192 @@ describe("filter catalog integration", () => {
 			body: {
 				coin_cost: 12,
 				tag_id: null,
-				operation_type: "text_to_image",
 			},
 		});
-		const updated = await successJson<{ coin_cost: number; tag: null; operation_type: string }>(updateResponse);
+		const updated = await successJson<{ coin_cost: number; tag: null }>(updateResponse);
 
 		expect(updateResponse.status).toBe(200);
 		expect(updated.data).toMatchObject({
 			coin_cost: 12,
 			tag: null,
-			operation_type: "text_to_image",
 		});
+	});
+
+	/* ═══════════════ Admin filter operation_type validation ═══════════════ */
+
+	it("rejects admin filter create with operation_type=text_to_image", async () => {
+		const response = await appFetch("/api/admin/filters", {
+			method: "POST",
+			headers: adminHeaders(),
+			body: {
+				name: "Bad Op Filter",
+				slug: "bad-op-filter",
+				category: "test",
+				provider_name: "openrouter",
+				model_key: "some-model",
+				operation_type: "text_to_image",
+				prompt_template: "Generate an image",
+				input_media_types: "image",
+				coin_cost: 5,
+			},
+		});
+		expect(response.status).toBe(400);
+	});
+
+	it("rejects admin filter update with operation_type=text_to_video", async () => {
+		const filter = await insertFilter({ slug: "op-type-check" });
+		const response = await appFetch(`/api/admin/filters/${filter.id}`, {
+			method: "PATCH",
+			headers: adminHeaders(),
+			body: { operation_type: "text_to_video" },
+		});
+		expect(response.status).toBe(400);
+	});
+
+	it("rejects mismatched output_media_type for image_to_image", async () => {
+		const response = await appFetch("/api/admin/filters", {
+			method: "POST",
+			headers: adminHeaders(),
+			body: {
+				name: "Bad Output",
+				slug: "bad-output",
+				category: "test",
+				provider_name: "atlas",
+				model_key: "some-model",
+				operation_type: "image_to_image",
+				output_media_type: "video",
+				prompt_template: "Make image",
+				input_media_types: "image",
+				coin_cost: 5,
+			},
+		});
+		expect(response.status).toBe(400);
+	});
+
+	it("rejects min_media_count > max_media_count", async () => {
+		const response = await appFetch("/api/admin/filters", {
+			method: "POST",
+			headers: adminHeaders(),
+			body: {
+				name: "Bad Count",
+				slug: "bad-count",
+				category: "test",
+				provider_name: "atlas",
+				model_key: "some-model",
+				operation_type: "image_to_image",
+				prompt_template: "Make image",
+				input_media_types: "image",
+				coin_cost: 5,
+				min_media_count: 3,
+				max_media_count: 1,
+			},
+		});
+		expect(response.status).toBe(400);
+	});
+
+	it("creates image_to_video filter with correct output_media_type", async () => {
+		const response = await appFetch("/api/admin/filters", {
+			method: "POST",
+			headers: adminHeaders(),
+			body: {
+				name: "Animate Photo",
+				slug: "animate-photo",
+				category: "video",
+				provider_name: "atlas",
+				model_key: "wan/image-to-video",
+				operation_type: "image_to_video",
+				prompt_template: "Animate this photo into a cinematic clip",
+				input_media_types: "image",
+				coin_cost: 15,
+			},
+		});
+		const body = await successJson<{ operation_type: string; output_media_type: string }>(response);
+		expect(response.status).toBe(201);
+		expect(body.data.operation_type).toBe("image_to_video");
+		expect(body.data.output_media_type).toBe("video");
+	});
+
+	/* ═══════════════ generation_schema presence ═══════════════ */
+
+	it("mobile filter list includes generation_schema", async () => {
+		const { token } = await createAuthenticatedUser();
+		await insertFilter({ slug: "schema-list-test", operation_type: "image_to_image" });
+
+		const response = await appFetch("/api/mobile/filters", { headers: authHeaders(token) });
+		const body = await successJson<Record<string, unknown>[]>(response);
+
+		const item = body.data[0] as { generation_schema: Record<string, unknown> };
+		expect(item.generation_schema).toMatchObject({
+			operation_type: "image_to_image",
+			output_media_type: "image",
+			requires_media: true,
+			input_media_type: "image",
+			min_media_count: 1,
+			max_media_count: 1,
+			allows_user_prompt: false,
+		});
+		expect(Array.isArray(item.generation_schema.supported_mime_types)).toBe(true);
+		expect(typeof item.generation_schema.max_file_size_mb).toBe("number");
+	});
+
+	it("mobile filter detail includes generation_schema", async () => {
+		const { token } = await createAuthenticatedUser();
+		await insertFilter({ slug: "schema-detail-test", operation_type: "image_to_video", output_media_type: "video" });
+
+		const response = await appFetch("/api/mobile/filters/schema-detail-test", { headers: authHeaders(token) });
+		const body = await successJson<Record<string, unknown>>(response);
+
+		const data = body.data as { generation_schema: Record<string, unknown> };
+		expect(data.generation_schema).toMatchObject({
+			operation_type: "image_to_video",
+			output_media_type: "video",
+			allows_user_prompt: false,
+		});
+	});
+
+	it("mobile home includes generation_schema on featured filters", async () => {
+		const { token } = await createAuthenticatedUser();
+		await insertFilter({ slug: "schema-home-test", is_featured: 1, featured_sort_order: 1 });
+
+		const response = await appFetch("/api/mobile/home", { headers: authHeaders(token) });
+		const body = await successJson<{ featured: Record<string, unknown>[] }>(response);
+
+		const item = body.data.featured[0] as { generation_schema: Record<string, unknown> };
+		expect(item.generation_schema).toBeDefined();
+		expect(item.generation_schema.allows_user_prompt).toBe(false);
+	});
+
+	it("category filters include generation_schema", async () => {
+		const { token } = await createAuthenticatedUser();
+		const category = await insertCategory({ slug: "schema-cat" });
+		const filter = await insertFilter({ slug: "schema-cat-filter" });
+		await insertFilterCategory(filter.id, category.id);
+
+		const response = await appFetch("/api/mobile/categories/schema-cat/filters", { headers: authHeaders(token) });
+		const body = await successJson<Record<string, unknown>[]>(response);
+
+		const item = body.data[0] as { generation_schema: Record<string, unknown> };
+		expect(item.generation_schema).toBeDefined();
+		expect(item.generation_schema.allows_user_prompt).toBe(false);
+	});
+
+	it("generation_schema does not expose provider fields", async () => {
+		const { token } = await createAuthenticatedUser();
+		await insertFilter({
+			slug: "schema-safety",
+			provider_name: "openrouter",
+			model_key: "secret-model",
+			prompt_template: "SECRET",
+		});
+
+		const response = await appFetch("/api/mobile/filters", { headers: authHeaders(token) });
+		const body = await successJson<Record<string, unknown>[]>(response);
+		const schema = (body.data[0] as { generation_schema: Record<string, unknown> }).generation_schema;
+
+		expect(schema).not.toHaveProperty("provider_name");
+		expect(schema).not.toHaveProperty("model_key");
+		expect(schema).not.toHaveProperty("prompt_template");
+		expect(schema.allows_user_prompt).toBe(false);
 	});
 
 	it("rejects admin filter create with an invalid tag_id", async () => {
@@ -373,9 +548,9 @@ describe("filter catalog integration", () => {
 				name: "Bad Tag Filter",
 				slug: "bad-tag-filter",
 				category: "test",
-				provider_name: "openrouter",
-				model_key: "bytedance-seed/seedream-4.5",
-				operation_type: "text_to_image",
+				provider_name: "atlas",
+				model_key: "some-model",
+				operation_type: "image_to_image",
 				prompt_template: "Generate an image",
 				input_media_types: "image",
 				coin_cost: 5,

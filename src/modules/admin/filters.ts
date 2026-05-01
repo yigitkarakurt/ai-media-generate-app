@@ -33,7 +33,23 @@ const jsonObjectSchema = z.union([
 
 /* ──────────────── Filter schemas ──────────────── */
 
-const createFilterSchema = z.object({
+/**
+ * Allowed operation types for filter/effect templates.
+ * text_to_image and text_to_video are NOT filter operations —
+ * those will be implemented as separate endpoints in a future task.
+ */
+const FILTER_OPERATION_TYPES = ["image_to_image", "image_to_video"] as const;
+type FilterOperationType = (typeof FILTER_OPERATION_TYPES)[number];
+
+const FILTER_OUTPUT_MEDIA_TYPES = ["image", "video"] as const;
+const FILTER_INPUT_MEDIA_TYPES = ["image", "video"] as const;
+
+/** Derive the expected output_media_type for a given operation_type. */
+function expectedOutputMediaType(opType: FilterOperationType): "image" | "video" {
+	return opType === "image_to_video" ? "video" : "image";
+}
+
+const filterSchemaShape = {
 	name: z.string().min(1).max(100),
 	slug: z.string().min(1).max(100),
 	description: z.string().max(500).default(""),
@@ -42,11 +58,36 @@ const createFilterSchema = z.object({
 	provider_model_id: z.string().min(1).optional(),
 	provider_name: z.string().min(1).max(50).default("atlas"),
 	model_key: z.string().min(1).max(200),
-	operation_type: z.enum(["text_to_image", "image_to_image"]),
+	operation_type: z.enum(FILTER_OPERATION_TYPES, {
+		errorMap: () => ({
+			message: `operation_type must be one of: ${FILTER_OPERATION_TYPES.join(", ")}. text_to_image and text_to_video are not supported for filter/effect templates.`,
+		}),
+	}),
+	output_media_type: z.enum(FILTER_OUTPUT_MEDIA_TYPES).optional(),
 	prompt_template: z.string().max(2000).default(""),
 	default_params_json: jsonObjectSchema.optional(),
 	config: jsonObjectSchema.optional(),
 	input_media_types: z.string().min(1).default("image"),
+	// Input requirement fields
+	requires_media: z.boolean().default(true),
+	input_media_type: z.enum(FILTER_INPUT_MEDIA_TYPES).default("image"),
+	min_media_count: z.number().int().min(1).default(1),
+	max_media_count: z.number().int().min(1).default(1),
+	supported_mime_types_json: z
+		.string()
+		.default('["image/jpeg","image/png","image/webp"]')
+		.refine(
+			(v) => {
+				try {
+					return Array.isArray(JSON.parse(v));
+				} catch {
+					return false;
+				}
+			},
+			{ message: "supported_mime_types_json must be a valid JSON array string" },
+		)
+		.optional(),
+	max_file_size_mb: z.number().int().min(1).max(500).default(15),
 	coin_cost: z.number().int().min(0),
 	tag_id: z.string().uuid().nullable().optional(),
 	preview_image_url: z.string().url().or(z.literal("")).default(""),
@@ -54,13 +95,41 @@ const createFilterSchema = z.object({
 	featured_sort_order: z.number().int().min(0).default(0),
 	is_active: z.boolean().default(true),
 	sort_order: z.number().int().min(0).default(0),
-});
+};
 
-const updateFilterSchema = createFilterSchema.partial();
+function refineFilterCrossFields(
+	data: { operation_type?: string; output_media_type?: string; min_media_count?: number; max_media_count?: number },
+	ctx: z.RefinementCtx,
+) {
+	if (data.min_media_count !== undefined && data.max_media_count !== undefined) {
+		if (data.max_media_count < data.min_media_count) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["max_media_count"],
+				message: `max_media_count (${data.max_media_count}) must be >= min_media_count (${data.min_media_count})`,
+			});
+		}
+	}
+	if (data.operation_type !== undefined && data.output_media_type !== undefined) {
+		const expected = expectedOutputMediaType(data.operation_type as FilterOperationType);
+		if (data.output_media_type !== expected) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["output_media_type"],
+				message: `output_media_type must be '${expected}' when operation_type is '${data.operation_type}'`,
+			});
+		}
+	}
+}
+
+const createFilterSchema = z.object(filterSchemaShape).superRefine(refineFilterCrossFields);
+const updateFilterSchema = z.object(filterSchemaShape).partial().superRefine(refineFilterCrossFields);
+
+
 
 /* ──────────────── Preview schemas ──────────────── */
 
-const ALLOWED_PREVIEW_MEDIA_TYPES = ["image"] as const;
+const ALLOWED_PREVIEW_MEDIA_TYPES = ["image", "video"] as const;
 
 const createPreviewSchema = z.object({
 	preview_url: z.string().url(),
@@ -104,6 +173,7 @@ function toAdminFilter(row: AdminFilterRow) {
 		...row,
 		is_active: Boolean(row.is_active),
 		is_featured: Boolean(row.is_featured),
+		requires_media: Boolean(row.requires_media),
 		tag: row.tag_id
 			? {
 				id: row.tag_id,
@@ -159,6 +229,17 @@ function buildConfig(
 		...(modelKey ? { model_key: modelKey } : {}),
 		...(operationType ? { operation_type: operationType } : {}),
 	};
+}
+
+/** Derive output_media_type from operation_type if not explicitly supplied. */
+function resolveOutputMediaType(
+	data: z.infer<typeof createFilterSchema> | z.infer<typeof updateFilterSchema>,
+	existing?: FilterRow,
+): string {
+	if (data.output_media_type) return data.output_media_type;
+	const opType = data.operation_type ?? existing?.operation_type;
+	if (opType === "image_to_video") return "video";
+	return "image";
 }
 
 /* ──────────────── Router ──────────────── */
@@ -217,6 +298,7 @@ filters.post("/", async (c) => {
 	const id = crypto.randomUUID();
 	const providerModelId = data.provider_model_id ?? data.model_key;
 	const config = buildConfig(data);
+	const outputMediaType = resolveOutputMediaType(data);
 
 	await assertTagExists(db, data.tag_id);
 
@@ -227,8 +309,10 @@ filters.post("/", async (c) => {
 				provider_model_id, provider_name, prompt_template, default_params_json,
 				config, input_media_types, is_active, coin_cost, tag_id, preview_image_url,
 				model_key, operation_type, is_featured, featured_sort_order, sort_order,
+				requires_media, input_media_type, min_media_count, max_media_count,
+				supported_mime_types_json, max_file_size_mb, output_media_type,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			id,
@@ -252,6 +336,13 @@ filters.post("/", async (c) => {
 			data.is_featured ? 1 : 0,
 			data.featured_sort_order,
 			data.sort_order,
+			data.requires_media ? 1 : 0,
+			data.input_media_type,
+			data.min_media_count,
+			data.max_media_count,
+			data.supported_mime_types_json ?? '["image/jpeg","image/png","image/webp"]',
+			data.max_file_size_mb,
+			outputMediaType,
 			now,
 			now,
 		)
@@ -295,7 +386,22 @@ filters.patch("/:id", async (c) => {
 			values.push(data.model_key);
 		}
 	}
-	if (data.operation_type !== undefined) { sets.push("operation_type = ?"); values.push(data.operation_type); }
+	if (data.operation_type !== undefined) {
+		sets.push("operation_type = ?");
+		values.push(data.operation_type);
+		// Auto-derive output_media_type when operation_type changes and no explicit value given
+		if (data.output_media_type === undefined) {
+			sets.push("output_media_type = ?");
+			values.push(resolveOutputMediaType(data, existing));
+		}
+	}
+	if (data.output_media_type !== undefined) {
+		// Only add if not already added above
+		if (!data.operation_type) {
+			sets.push("output_media_type = ?");
+			values.push(data.output_media_type);
+		}
+	}
 	if (data.provider_name !== undefined) { sets.push("provider_name = ?"); values.push(data.provider_name); }
 	if (data.prompt_template !== undefined) { sets.push("prompt_template = ?"); values.push(data.prompt_template); }
 	if (data.default_params_json !== undefined) { sets.push("default_params_json = ?"); values.push(serializeJsonObject(data.default_params_json)); }
@@ -311,9 +417,16 @@ filters.patch("/:id", async (c) => {
 	if (data.featured_sort_order !== undefined) { sets.push("featured_sort_order = ?"); values.push(data.featured_sort_order); }
 	if (data.is_active !== undefined) { sets.push("is_active = ?"); values.push(data.is_active ? 1 : 0); }
 	if (data.sort_order !== undefined) { sets.push("sort_order = ?"); values.push(data.sort_order); }
+	// Input requirement fields
+	if (data.requires_media !== undefined) { sets.push("requires_media = ?"); values.push(data.requires_media ? 1 : 0); }
+	if (data.input_media_type !== undefined) { sets.push("input_media_type = ?"); values.push(data.input_media_type); }
+	if (data.min_media_count !== undefined) { sets.push("min_media_count = ?"); values.push(data.min_media_count); }
+	if (data.max_media_count !== undefined) { sets.push("max_media_count = ?"); values.push(data.max_media_count); }
+	if (data.supported_mime_types_json !== undefined) { sets.push("supported_mime_types_json = ?"); values.push(data.supported_mime_types_json); }
+	if (data.max_file_size_mb !== undefined) { sets.push("max_file_size_mb = ?"); values.push(data.max_file_size_mb); }
 
 	if (sets.length === 0) {
-		return success(c, existing);
+		return success(c, toAdminFilter(existing as unknown as AdminFilterRow));
 	}
 
 	sets.push("updated_at = ?");

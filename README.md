@@ -267,6 +267,59 @@ filters ──┬── tags              (one primary tag per filter via tag_id
 - **Categories** — reusable content sections for the home screen and catalog browsing
 - **Filter Previews** — multiple preview assets per filter (primary + gallery)
 
+### Filter Operation Types
+
+Filters support two operation types. **text_to_image and text_to_video are not filter operations** — those will be separate endpoints in a future task.
+
+| `operation_type` | `output_media_type` | Meaning |
+|---|---|---|
+| `image_to_image` | `image` | User uploads an image → backend generates a new image |
+| `image_to_video` | `video` | User uploads an image → backend generates a video clip |
+
+### generation_schema — Mobile UI Contract
+
+Every mobile filter response includes a `generation_schema` object. The mobile app **must** use this — not any other field — to draw upload UI, validate input, and indicate output type.
+
+```json
+{
+  "generation_schema": {
+    "operation_type": "image_to_image",
+    "output_media_type": "image",
+    "requires_media": true,
+    "input_media_type": "image",
+    "min_media_count": 1,
+    "max_media_count": 1,
+    "supported_mime_types": ["image/jpeg", "image/png", "image/webp"],
+    "max_file_size_mb": 15,
+    "allows_user_prompt": false
+  }
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `operation_type` | string | `image_to_image` or `image_to_video` |
+| `output_media_type` | string | `image` or `video` — what the filter produces |
+| `requires_media` | boolean | Always `true` for current filter types |
+| `input_media_type` | string | `image` — what the user must upload |
+| `min_media_count` | number | Minimum number of assets required (always ≥ 1) |
+| `max_media_count` | number | Maximum assets allowed |
+| `supported_mime_types` | string[] | Accepted MIME types for upload validation |
+| `max_file_size_mb` | number | Per-asset size limit |
+| `allows_user_prompt` | boolean | Always `false` — prompts are backend-owned |
+
+**Mobile UI rules:**
+- Show media upload UI when `requires_media: true`
+- Validate file type against `supported_mime_types` before upload
+- Validate file size against `max_file_size_mb` before upload
+- Allow between `min_media_count` and `max_media_count` assets
+- Enable the "Generate" button only when asset count and types are valid
+- Show "Generates Video" badge when `output_media_type === 'video'`
+- Never show or accept a prompt input for filter generation
+
+**Why `allows_user_prompt` is always false:**
+Filter/effect generation uses backend-owned `prompt_template` values that are crafted to produce consistent results. Allowing user prompts would break the product's quality guarantee and expose internal model routing. Free text-to-image creation will be a separate, future endpoint.
+
 ### Mobile Catalog Responses
 
 Mobile filter responses are client-safe — backend-only fields are never exposed:

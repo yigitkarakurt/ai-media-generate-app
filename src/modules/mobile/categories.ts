@@ -5,6 +5,7 @@ import { success, paginated } from "../../shared/api-response";
 import { parseQuery, paginationQuery } from "../../shared/validation";
 import type { CategoryRow, FilterRow } from "../../core/db/schema";
 import { LIST_PREVIEW_LIMIT, fetchPreviewsByFilterIds } from "./_previews";
+import { buildGenerationSchema } from "./_generation_schema";
 
 /* ──────────────── Query row types ──────────────── */
 
@@ -38,6 +39,7 @@ function toClientFilter(row: CategoryFilterRow) {
 		tag: row.tag_id && row.tag_is_active
 			? { id: row.tag_id, slug: row.tag_slug, name: row.tag_name }
 			: null,
+		generation_schema: buildGenerationSchema(row),
 	};
 }
 
@@ -84,6 +86,10 @@ categories.get("/:slug/filters", async (c) => {
 				`SELECT f.id, f.name, f.slug, f.description, f.coin_cost,
 						f.input_media_types, f.is_featured, f.is_active,
 						f.sort_order, f.tag_id,
+						f.operation_type, f.output_media_type,
+						f.requires_media, f.input_media_type,
+						f.min_media_count, f.max_media_count,
+						f.supported_mime_types_json, f.max_file_size_mb,
 						t.slug AS tag_slug, t.name AS tag_name, t.is_active AS tag_is_active
 				FROM filter_categories fc
 				JOIN filters f ON f.id = fc.filter_id AND f.is_active = 1
